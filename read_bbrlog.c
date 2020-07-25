@@ -193,7 +193,6 @@ static const char *log_names[MAX_TYPES] = {
 	"USER_LOG  ",		/* 59 */
 	"SENDFILE  ",		/* 60 */
 	"TCP_LOG_HTTP_T",	/* 61 */
-	"TCP_ACCOUNTING",	/* 62 */
 };
 
 static uint32_t time_last_setting = 0;
@@ -1883,18 +1882,6 @@ handle_user_event_log_entry(const struct tcp_log_buffer *l)
 #endif
 
 static void
-dump_accounting(const struct tcp_log_buffer *l)
-{
-	int i, limit;
-
-	limit = (int)l->tlb_flex1;
-	fprintf(out, "%s type:%d ", evt_name(l->tlb_eventid), l->tlb_flex2);
-	for (i = 0; i < limit; i++)
-		fprintf(out, "%lu ", l->tlb_stackinfo.u64_raw.u64_flex[i]);
-	fprintf(out, "\n");
-}
-
-static void
 dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 {
 	const char *mask;
@@ -1911,12 +1898,8 @@ dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	int colat;
 
 	id = l->tlb_eventid;
-	msg_types_list[id]++;
-	if (id == TCP_LOG_ACCOUNTING) {
-		dump_accounting(l);
-		return;
-	}
 	is_bbr = 1;
+	msg_types_list[id]++;
 	if (l->tlb_eventid == TCP_LOG_RTO) {
 		tlb_sn = l->tlb_sn;
 		return;
@@ -4139,10 +4122,6 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	bbr = &l->tlb_stackinfo.u_bbr;
 	id = l->tlb_eventid;
 	msg_types_list[id]++;
-	if (id == TCP_LOG_ACCOUNTING) {
-		dump_accounting(l);
-		return;
-	}
 	l_timeStamp = bbr->timeStamp;
 	if (id == TCP_LOG_SOCKET_OPT) sock_opt_cnt++;
 	if ((id == TCP_LOG_USERSEND) ||
@@ -5528,10 +5507,6 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	}
 	id = l->tlb_eventid;
 	msg_types_list[id]++;
-	if (id == TCP_LOG_ACCOUNTING) {
-		dump_accounting(l);
-		return;
-	}
 	if (id == TCP_LOG_SOCKET_OPT) sock_opt_cnt++;
 	if (prev_tick == 0) {
 		prev_tick_set = l->tlb_ticks;
