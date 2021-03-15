@@ -37,6 +37,7 @@ static uint32_t highest_delta = 0;
 static int32_t showExtraInfo = 0;
 static int32_t file_count_limit = 0;
 static int32_t file_count_at = 0;
+static int32_t use_relative_seq = 0;
 
 static FILE *dump_out_sack=NULL;
 #define	MAX_TYPES  TCP_LOG_END
@@ -161,7 +162,7 @@ static const char *log_names[MAX_TYPES] = {
 	"DOSEG_DONE", /* End of pacer do segment          27 */
 	"EXIT_GAIN ", /* pacer do_segment completes       28 */
 	"THRESH_CALC",/* log the calculation routine      29 */
-	"EXTRA_GAIN", /* Extra cwnd gain added            30 */
+	"MAP_CHGS",   /* Map changes to the sendmap       30 */
 	"USERSEND  ", /* User level sends data            31 */
 	"RSM_CLEAR ", /* Unused                           32 */
 	"STATE_TARGET", /* Set of state target              33 */
@@ -182,7 +183,7 @@ static const char *log_names[MAX_TYPES] = {
 	"BBR_SETTINGS",		/* 48 */
 	"BBR_SRTT_GAIN_EVENT",	/* 49 */
 	"TCP_LOG_REASS", 	/* 50 */
- 	"TCP_HDWR_TLS",		/* 51 */
+	"TCP_PACE_SIZE",	/* 51 */
 	"BBR_TCP_HDWR_PACE",	/* 52 */
 	"BBR_LOG_TSTMP_VAL",	/* 53 */
 	"TCP_LOG_CONNEND", 	/* 54 */
@@ -240,6 +241,7 @@ evt_name(int id)
 	}
 	return(log_names[id]);
 }
+
 
 static char *
 display_bw(uint64_t bw, int uniq_cpy)
@@ -439,11 +441,11 @@ static const char *startup_reasons[12] = {
 	"Not up to speed", /* 1 */
 	"No loss at target", /* 2 */
 	"Had large Gain", /* 3 */
-    "Loss forces exit", /* 4 */
-    "Record new loss", /* 5 */
-    "Exit to drain", /* 6 */
+	"Loss forces exit", /* 4 */
+	"Record new loss", /* 5 */
+	"Exit to drain", /* 6 */
 	"Not enough measurements", /* 7 */
-    "No exit required", /* 8 */
+	"No exit required", /* 8 */
 	"No measurements", /* 9 */
 	"No loss no inc-rtt", /* 10 */
 	"No loss so stay" /* 11 */
@@ -1139,9 +1141,8 @@ translate_tcp_sock_option(uint32_t opt)
 	} else if (opt == TCP_RACK_PROFILE) {
 		return ("TCP_RACK_PROFILE");
 	} else {
-		return ("Unkown?");
+		return ("Unknown?");
 	}
-
 }
 
 static void
@@ -1171,13 +1172,13 @@ tcp_display_wakeup(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr
 
 	notify = bbr->flex1 & 0x1bc;
 	if (bbr->flex8 == 1) {
-		fprintf(out, "Read wakeup recv'd %d bytes -- sbflags 0x%x -- %s avail:%u\n",
+		fprintf(out, "Read wakeup recv'd %d bytes -- sbflags 0x%x -- %s avail:%u out:%u\n",
 			bbr->flex2,  bbr->flex1, ((notify) ? "will wake" : "will not wake"),
-			l->tlb_rxbuf.tls_sb_acc);
+			l->tlb_rxbuf.tls_sb_acc, (l->tlb_snd_max - l->tlb_snd_una));
 	} else {
-		fprintf(out, "Write wakeup ack'd %u bytes -- sbflags 0x%x -- %s avail:%u\n",
+		fprintf(out, "Write wakeup ack'd %u bytes -- sbflags 0x%x -- %s avail:%u out:%u\n",
 			bbr->flex2,  bbr->flex1, ((notify) ? "will wake" : "will not wake"),
-			l->tlb_txbuf.tls_sb_acc);
+			l->tlb_txbuf.tls_sb_acc, (l->tlb_snd_max - l->tlb_snd_una));
 	}
 }
 #endif
@@ -1700,47 +1701,50 @@ display_connection_end(const struct tcp_log_buffer *l,
 }
 
 static uint64_t sock_opt_cnt = 0;
-
+static uint32_t lro_flush_time = 0;
+static int lro_flush_is_ms = 0;
 static void
 dump_out_lro_log(const struct tcp_log_bbr *bbr)
 {
-	if (bbr->flex8 != 22) {
+	if (bbr->flex8 == 13) {
+		/* Checksum failure */
 		fprintf(out,
-			"Frm:%d, app_c:%d app_l:%d, head:0x%lx(l:%u) m:0x%lx(l:%d) p_len:%u tlen:%d llim:%u tm:%d\n",
-			bbr->flex8,
-			bbr->flex3,
-			bbr->flex7,
-			bbr->delRate,
-			bbr->flex5,
-			bbr->cur_del_rate,
-			bbr->flex2,
-			bbr->flex4,
-			bbr->flex1,
-			bbr->flex6, bbr->pkts_out);
-	} else {
-		fprintf(out,
-			"Frm:%d, queued:%d need_wake:%d inp_flags2:0x%x in_input:%d will_flush:%d\n",
-			bbr->flex8,
-			bbr->pkts_out,
-			bbr->flex1,
+			" Checksum failed csum_flags:0x%x tlen:%u drop:%u sum:0x%x\n",
 			bbr->inflight,
+			bbr->flex1,
 			bbr->delivered,
-			bbr->pacing_gain);
+			bbr->pacing_gain
+			);
+
+		return;
 	}
+	fprintf(out,
+		"Frm:%d, queued:%d need_wake:%d inp_flags2:0x%x in_input:%d will_flush:%d appended:%u compressed:%u in_epoch:%d\n",
+		bbr->flex8,
+		bbr->pkts_out,
+		bbr->flex1,
+		bbr->inflight,
+		bbr->delivered,
+		bbr->pacing_gain,
+		bbr->lost,
+		bbr->pkt_epoch, bbr->inhpts);
 	if (extra_print) {
 		print_out_space(out);
-		fprintf(out, "le_nxt_seq:%u m_nxt_seq:%u, le_th_ack:%u m_th_ack:%u, le_win:%u th_win:%u\n",
+		fprintf(out, "le_nxt_seq:%u csum_flags:%x, le_th_ack:%u drop_hdrl:%u, le_win:%u th_sum:%u\n",
 			bbr->epoch,
-			ntohl(bbr->inflight),
+			bbr->inflight,
 			ntohl(bbr->lt_epoch),
-			ntohl(bbr->delivered),
+			bbr->delivered,
 			ntohs(bbr->cwnd_gain),
 			ntohs(bbr->pacing_gain));
 		print_out_space(out);
-		fprintf(out, "head_mflags:0x%lx head_arr_tstmp:0x%lx\n",
+		fprintf(out, "head_mflags:0x%lx head_arr_tstmp:0x%lx flush_all_time:%u\n",
 			bbr->delRate,
-			bbr->rttProp);
+			bbr->rttProp, bbr->flex6);
 	}
+	lro_flush_time = bbr->flex6;
+	if (lro_flush_is_ms)
+		lro_flush_time *= 1000;
 
 }
 
@@ -1882,6 +1886,43 @@ handle_user_event_log_entry(const struct tcp_log_buffer *l)
 #endif
 
 static void
+print_pace_size(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
+{
+	if (bbr->flex8 == 1) {
+		/* The pacing calculation from tcp_ratelimit.c */
+		fprintf(out, "Size calculation bw:%s(%lu) segsiz:%u new_tso:%u\n",
+			display_bw(bbr->cur_del_rate, 0),
+			bbr->cur_del_rate,
+			bbr->flex1, bbr->flex2);
+	} else if (bbr->flex8 == 2) {
+		/* Rack uses the value 2 in flex8 to announce any changes */
+		fprintf(out, "Sizes Changed - Old min:%u Old max:%u min:%u max:%u line:%d sb_acc:%u\n",
+			bbr->flex4, bbr->flex5,
+			bbr->flex1, bbr->flex3, bbr->flex6,
+			l->tlb_txbuf.tls_sb_acc);
+	} else if (bbr->flex8 == 3) {
+		/* Hardware pacing is involved we are possibly stepping up the tso size */
+		fprintf(out, "HDWR Pacing upscale hdwr rate %s(%lu) time_bet:%u calc_bet:%u segs:%u mult:%d\n",
+			display_bw(bbr->delRate, 0),
+			bbr->delRate,
+			bbr->flex3, bbr->flex4,
+			bbr->flex5, bbr->flex7);
+	} else if (bbr->flex8 == 4) {
+		/* Client error, rate set is below rate desired */
+		char *hw;
+
+		hw = display_bw(bbr->cur_del_rate, 1),
+		fprintf(out, "HDWR to Software rate-mismatch hdwr rate:%s(%lu) software:%s(%lu) time_bet:%u > calc_bet:%u\n",
+			hw, bbr->cur_del_rate,
+			display_bw(bbr->delRate, 0),
+			bbr->delRate,
+			bbr->flex3, bbr->flex4);
+		if (hw)
+			free(hw);
+	}
+}
+
+static void
 dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 {
 	const char *mask;
@@ -1898,8 +1939,8 @@ dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	int colat;
 
 	id = l->tlb_eventid;
-	is_bbr = 1;
 	msg_types_list[id]++;
+	is_bbr = 1;
 	if (l->tlb_eventid == TCP_LOG_RTO) {
 		tlb_sn = l->tlb_sn;
 		return;
@@ -2496,13 +2537,6 @@ dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		}
 		break;
 #endif
-	case BBR_LOG_EXTRACWNDGAIN:
-		if (show_all_messages) {
-			fprintf(out, "Addition from:%s extra_gain:%u acked_calc:%u\n",
-				((bbr->flex8 == 1) ? "stretch ack" :  "compressed ack"),
-				bbr->flex1, bbr->flex2);
-		}
-		break;
 	case BBR_LOG_THRESH_CALC:
 		if (show_all_messages) {
 			if (bbr->flex8 == BBR_TO_FRM_RACK) {
@@ -2836,12 +2870,22 @@ dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 					l->tlb_snd_una, th_ack, bbr->pkt_epoch, th_seq, l->tlb_rcv_nxt, tasf,
 					bbr->flex6);
 				print_out_space(out);
-				fprintf(out, " m_flags:0x%x hwtsmp:%u(-%u) arrtstmp:%u(-%u) actual:%u lb:%u\n",
-					bbr->flex3,
-					bbr->lt_epoch, (bbr->pkts_out - bbr->lt_epoch),
-					bbr->flex5, (bbr->pkts_out - bbr->flex5),
-					bbr->pkts_out, bbr->flex2);
-
+				if (bbr->flex3 & M_TSTMP) {
+					fprintf(out, " m_flags:0x%x hdwr_arrtstmp:%u(%d) flush_time:%u lb:%u\n",
+						bbr->flex3,
+						bbr->lt_epoch, (bbr->timeStamp - bbr->lt_epoch),
+						bbr->flex6,
+						bbr->flex2);
+				} else if (bbr->flex3 & M_TSTMP_LRO) {
+					fprintf(out, " m_flags:0x%x lro_arrtstmp:%u(%d) flush_time:%u lb:%u\n",
+						bbr->flex3,
+						bbr->flex5, (bbr->timeStamp - bbr->flex5),
+						bbr->flex6,
+						bbr->flex2);
+				} else {
+					fprintf(out, "  No hdwr or lro timestamp flush_time:%u?\n",
+						bbr->flex6);
+				}
 				optptr = (const uint8_t *)th;
 				optptr += sizeof(struct tcphdr);
 				process_options(&to, th, optptr);
@@ -2918,25 +2962,8 @@ dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			free(hw_bwd);
 	}
 	break;
-	case TCP_HDWR_TLS:
-		if (bbr->flex8 == 0) {
-			/* TCP m_copy_m logging */
-			if (bbr->flex1)
-				fprintf(out, "goal len:%d updated_len:%d mflags:0x%x mlen:%d off:%u\n",
-					bbr->flex3, bbr->flex4, bbr->flex1, bbr->flex2, bbr->flex5);
-			else
-				fprintf(out, "Final target len:%d final:%d\n", bbr->flex3, bbr->flex4);
-		} else {
-			/* BBR logging */
-			fprintf(out, "mode:%d len:%d rw:%u cwnd:%u avail:%u flight:%u out:%u olen:%u pseg:%u ca:%d\n",
-				bbr->flex7, bbr->flex4,
-				l->tlb_snd_wnd,
-				l->tlb_snd_cwnd,
-				l->tlb_txbuf.tls_sb_acc,
-				bbr->inflight,
-				(l->tlb_snd_max - l->tlb_snd_una),
-				bbr->flex2, bbr->flex3, bbr->flex5);
-		}
+	case TCP_HDWR_PACE_SIZE:
+		print_pace_size(l, bbr);
 		break;
 	case BBR_LOG_TSTMP_VAL:
 		fprintf(out, "ratio:%u use_it:%d set:%d peer_delta:0x%x%x delta:0x%x%x\n",
@@ -2998,6 +3025,9 @@ dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		if (th) {
 			th_ack = ntohl(th->th_ack);
 			th_seq = ntohl(th->th_seq);
+			if (use_relative_seq) {
+				th_seq -= l->tlb_iss;
+			}
 		} else {
 			th_ack = 0xbadbad;
 			th_seq = 0xbadbad;
@@ -4104,6 +4134,8 @@ static uint8_t gp_prtt_set = 0;
 static uint8_t gp_rtt_diff_set = 0;
 static uint32_t gp_lower_rtt = 0;
 static uint32_t last_cwnd_to_use = 0;
+static uint64_t total_log_in = 0;
+static uint64_t total_log_out = 0;
 
 static void
 dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
@@ -4278,17 +4310,51 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	case BBR_LOG_INQUEUE:
 	case BBR_LOG_ENTREC:
 	case BBR_LOG_EXITREC:
-	case BBR_LOG_CWND:
 	case BBR_LOG_BWSAMP:
 	case BBR_LOG_MSGSIZE:
 	case BBR_LOG_STATE:
 		fprintf(out, " new msg %d?\n", id);
+		break;
+	case BBR_LOG_CWND:
+		if ((bbr->flex8 == 0) ||
+		    (bbr->flex8 == 1)) {
+			fprintf(out, " cwnd update orig_cw:%u ssthresh:%u snd_max:%u th_ack:%u (%u) ccv->flags:0x%x bytes_this_ack:%u nsegs:%u abc_val:%urfc6675:%u\n",
+				l->tlb_snd_cwnd,
+				l->tlb_snd_ssthresh,
+				l->tlb_snd_max,
+				bbr->flex1,
+				(l->tlb_snd_max - bbr->flex1),
+				bbr->flex2,
+				bbr->flex3,
+				bbr->flex4,
+				bbr->flex5,
+				bbr->flex7);
+			print_out_space(out);
+			fprintf(out, " ---> new_cw:%u\n", bbr->flex6);
+		} else if (bbr->flex8 == 2) {
+			fprintf(out, " post_recovery orig_cw:%u ssthresh:%u snd_max:%u th_ack:%u (%u) ccv->flags:0x%x bytes_this_ack:%u nsegs:%u abc_val:%u rfc6675:%u\n",
+				bbr->flex6,
+				l->tlb_snd_ssthresh,
+				l->tlb_snd_max,
+				bbr->flex1,
+				(l->tlb_snd_max - bbr->flex1),
+				bbr->flex2,
+				bbr->flex3,
+				bbr->flex4,
+				bbr->flex5,
+				bbr->flex7);
+			print_out_space(out);
+			fprintf(out, " ---> new_cw:%u\n", l->tlb_snd_cwnd);
+
+		}
 		break;
 	case BBR_LOG_HDWR_PACE:
 	{
 		uint64_t hw_bw;
 		uint64_t ptr;
 		char *bwd, *hw_bwd, *req_bwd;
+		const char *str;
+
 		bwd = display_bw(bbr->delRate, 1);
 		req_bwd = display_bw(bbr->bw_inuse, 1);
 		hw_bw = bbr->flex1;
@@ -4299,18 +4365,73 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		ptr = bbr->flex3;
 		ptr <<= 32;
 		ptr |= bbr->flex4;
+		if (bbr->flex7 == 0) {
+			str = "Initial hardware rate acquired";
+		} else if (bbr->flex7 == 1) {
+			str = "Hardware cannot meet request -- lost hw pacing";
+		} else if (bbr->flex7 == 2) {
+			str = "Hardware rate updated";
+		} else if (bbr->flex7 == 3) {
+			str = "Capped at hardware rate";
+		} else if (bbr->flex7 == 4) {
+			str = "No rate change, update pace size";
+		} else if (bbr->flex7 == 5) {
+			str = "Rate falls below hardware minimum -- drop rate";
+		} else if (bbr->flex7 == 6) {
+			str = "Lost inp_snd_tag must re-attempt";
+		} else {
+			str = "Unknown log_hdwr_pace type";
+		}
 		fprintf(out,
-			"Line:%d ifp:0x%lx err:%d (DR:%s req_BW:%s hw_bw:%s) FH:0x%x\n",
+			"Line:%d %s(%d) ifp:0x%lx err:%d (DR:%s req_BW:%s hw_bw:%s) max_segs:%u\n",
 			bbr->flex5,
+			str, bbr->flex7,
 			ptr, bbr->flex6,
 			bwd, req_bwd, hw_bwd,
-			bbr->flex8);
+			bbr->applimited);
 		if (bwd)
 			free(bwd);
 		if (req_bwd)
 			free(req_bwd);
 		if (hw_bwd)
 			free(hw_bwd);
+		if (extra_print) {
+			char *cur_hw_rate, *prev_rate_in_table, *last_saved_rate;
+			const char *chwr, *prit, *lsr;
+
+			if (bbr->cur_del_rate) {
+				cur_hw_rate = display_bw(bbr->cur_del_rate, 1);
+				chwr = cur_hw_rate;
+			} else {
+				cur_hw_rate = NULL;
+				chwr = "None specified";
+			}
+			if (bbr->delRate) {
+				prev_rate_in_table = display_bw(bbr->delRate, 1);
+				prit = prev_rate_in_table;
+			} else {
+				prev_rate_in_table = NULL;
+				prit = "None specified";
+			}
+			if (bbr->rttProp) {
+				last_saved_rate = display_bw(bbr->rttProp, 1);
+				lsr = last_saved_rate;
+			} else {
+				last_saved_rate = NULL;
+				lsr = "None specified";
+			}
+			print_out_space(out);
+			fprintf(out, "hw_rate:%s(%lu) prev_rate_in_tbl:%s(%lu) previous_req_rate:%s(%lu)\n",
+				chwr, bbr->cur_del_rate,
+				prit, bbr->delRate,
+				lsr, bbr->rttProp);
+			if (cur_hw_rate)
+				free(cur_hw_rate);
+			if (prev_rate_in_table)
+				free(prev_rate_in_table);
+			if (last_saved_rate)
+				free(last_saved_rate);
+		}
 	}
 	break;
 	case BBR_LOG_HPTSI_CALC:
@@ -4342,18 +4463,18 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 				ccmode = "SS";
 				multiplier = (bbr->flex5 * 1.0);
 			}
-			fprintf(out, "mode:%d len:%u slot:%u min_seg:%u max_seg:%u gain:%u min_rtt:%u smRSC:0x%x\n",
+			fprintf(out, "mode:%d len:%u slot:%u min_seg:%u max_seg:%u gain:%u min_rtt:%u smRSC:0x%x mode:%s\n",
 				bbr->flex8,
 				bbr->flex2,
-				bbr->flex1, bbr->flex3, bbr->flex4, bbr->pacing_gain, bbr->pkts_out, bbr->cwnd_gain);
+				bbr->flex1, bbr->flex3, bbr->flex4, bbr->pacing_gain, bbr->pkts_out, bbr->cwnd_gain, ccmode);
 			lentim = bbr->rttProp;
 			rbw = display_bw(bw_raise, 1);
 			print_out_space(out);
-			fprintf(out, " bw_est:%s (%lu) actual_bw:%s (%lu) multiplier:%2.3f%% (%s) avail:%u\n",
+			fprintf(out, " bw_est:%s (%lu) actual_bw:%s (%lu) multiplier:%2.3f%% avail:%u\n",
 				display_bw(bw_est, 0),
 				bw_est,
 				rbw,
-				bw_raise, multiplier, ccmode,
+				bw_raise, multiplier,
 				l->tlb_txbuf.tls_sb_acc);
 			if (rbw != NULL)
 				free(rbw);
@@ -4518,6 +4639,19 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		} else if (bbr->flex8 == 15) {
 			fprintf(out, "Setting pacing max seg set was %lu now at %u line:%u minrtt:%u\n",
 				bbr->bw_inuse, bbr->flex4, bbr->pkt_epoch, bbr->pkts_out);
+		} else if (bbr->flex8 == 22) {
+			fprintf(out, "Addpart:%u Subpart:%u %s add (%d) flags:0x%x bw:%lu\n",
+				bbr->flex1,
+				bbr->flex2,
+				((bbr->pkts_out > 0)?  "Performed" : "Skipped"),
+				bbr->pkt_epoch,
+				bbr->use_lt_bw,
+				bbr->delRate
+				);
+		} else if (bbr->flex8 == 27) {
+			fprintf(out, "Timer setup slot originally:%u we use %u\n",
+				bbr->flex2, bbr->flex1);
+
 		} else if (bbr->flex8 == 99) {
 			fprintf(out, "SRTT:%u overrides pacing time:%u minrtt:%u\n",
 				bbr->flex2, bbr->flex1, bbr->pkts_out);
@@ -4529,18 +4663,27 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	case BBR_LOG_BBRUPD:
 		/* PRR update */
 		if (bbr->flex8 == 14) {
-			fprintf(out, "EXIT RECOVERY cwnd:%u-to->%u ssthresh:%u\n",
-				bbr->pkts_out, l->tlb_snd_wnd, l->tlb_snd_ssthresh);
+			fprintf(out, "EXIT RECOVERY cw_before_exit:%u rw:%u ssthresh:%u cw:%u NR:0x%x flight:%u\n",
+				bbr->pkts_out, l->tlb_snd_wnd,
+				l->tlb_snd_ssthresh,
+				l->tlb_snd_cwnd,
+				bbr->use_lt_bw, bbr->inflight);
+		} else if (bbr->flex8 == 15) {
+			fprintf(out, "ENTER RECOVERY cw_before_entry:%u rw:%u ssthresh:%u cw:%u NR:0x%x flight:%u\n",
+				bbr->pkts_out,l->tlb_snd_wnd,
+				l->tlb_snd_ssthresh,
+				l->tlb_snd_cwnd,
+				bbr->use_lt_bw, bbr->inflight);
 		} else {
-		fprintf(out, "PRR UPDATE frm:%d out:%u recover_fs:%u sndcnt:%u del:%u sacked:%u holes:%u ssthresh:%u out:%u t_flags:0x%x\n",
-			bbr->flex8,
-			bbr->flex1,
-			bbr->flex2,
-			bbr->flex3,
-			bbr->flex4,
-			bbr->flex5, bbr->flex6,
-			l->tlb_snd_ssthresh,
-			(l->tlb_snd_max - l->tlb_snd_una), l->tlb_flags);
+			fprintf(out, "PRR UPDATE frm:%d out:%u recover_fs:%u sndcnt:%u del:%u sacked:%u holes:%u ssthresh:%u out:%u t_flags:0x%x NR:0x%x po:%d cw:%u\n",
+				bbr->flex8,
+				bbr->flex1,
+				bbr->flex2,
+				bbr->flex3,
+				bbr->flex4,
+				bbr->flex5, bbr->flex6,
+				l->tlb_snd_ssthresh,
+				(l->tlb_snd_max - l->tlb_snd_una), l->tlb_flags, bbr->use_lt_bw, bbr->pkts_out, l->tlb_snd_cwnd);
 		}
 		break;
 	case TCP_LOG_LRO:
@@ -4567,7 +4710,7 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 				sign = '+';
 				chg = l->tlb_snd_wnd - last_rwnd_at_out;
 			}
-			fprintf(out, "do:%d np:%d wo:%d in_per:%d (ip:%d) tmrs:%s sndcnt:%u way_out:%d out:%u state:%u rw:%d (%c%u)\n",
+			fprintf(out, "do:%d np:%d wo:%d in_per:%d (ip:%d) tmrs:%s sndcnt:%u way_out:%d out:%u state:%u rw:%d (%c%u) nseg:%d\n",
 				bbr->flex1,
 				bbr->flex2,
 				bbr->flex7,
@@ -4576,12 +4719,19 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 				mask, bbr->flex5,
 				bbr->flex3,
 				(l->tlb_snd_max - l->tlb_snd_una),
-				l->tlb_state, l->tlb_snd_wnd, sign, chg);
+				l->tlb_state, l->tlb_snd_wnd,
+				sign, chg, bbr->flex6);
 			if (extra_print) {
 				print_out_space(out);
-				fprintf(out, "avail:%u inq:%u\n",
+				fprintf(out, "avail:%u inq:%u NR:0x%x must:%d snd_max_at:%u out_at_rto:%u flight:%u cw:%u\n",
 					l->tlb_txbuf.tls_sb_acc,
-					l->tlb_rxbuf.tls_sb_acc);
+					l->tlb_rxbuf.tls_sb_acc,
+					bbr->use_lt_bw,
+					bbr->pacing_gain, bbr->delivered, bbr->pkts_out,
+					bbr->inflight,l->tlb_snd_cwnd);
+				print_out_space(out);
+				fprintf(out, "snd_una:%u snd_max:%u snd_nxt:%u\n",
+					l->tlb_snd_una, l->tlb_snd_max, l->tlb_snd_nxt);
 			}
 		}
 		break;
@@ -4607,17 +4757,32 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			get_progress_event(bbr->flex8), bbr->inhpts, l->tlb_state);
 		break;
 	case TCP_LOG_RTT:
-		fprintf(out, " rtt:%u applied to srtt %u var %u t_flags:%x cw:%u\n",
-			bbr->flex1,
-			((l->tlb_srtt * 1000) >> TCP_RTT_SHIFT),
-			((l->tlb_rttvar * 1000) >> TCP_RTT_SHIFT),
-			l->tlb_flags, l->tlb_snd_cwnd);
-		print_out_space(out);
-		fprintf(out, "sd:%d ackcnt:%u sackcnt:%u nomove:%u move:%u sst:%u\n",
-			bbr->flex8,
-			bbr->flex2, bbr->flex3,
-			bbr->flex4,
-			bbr->flex5, l->tlb_snd_ssthresh);
+		if (bbr->flex7 != 2) {
+			fprintf(out, " rtt:%u applied to srtt %u var %u t_flags:%x cw:%u\n",
+				bbr->flex1,
+				l->tlb_srtt,
+				l->tlb_rttvar,
+				l->tlb_flags, l->tlb_snd_cwnd);
+			print_out_space(out);
+			fprintf(out, "sd:%d ackcnt:%u sackcnt:%u nomove:%u move:%u sst:%u must:%d snd_max_at:%u out_at_rto:%u\n",
+				bbr->flex8,
+				bbr->flex2, bbr->flex3,
+				bbr->flex4,
+				bbr->flex5, l->tlb_snd_ssthresh,
+				bbr->pacing_gain, bbr->delivered, bbr->pkts_out);
+			print_out_space(out);
+			fprintf(out, "rttcur:%u rack_rto_min:%u rack_rto_max:%u t_rttmin:%u rxtmacro:%lu slop:%u\n",
+				bbr->flex6,
+				bbr->applimited,
+				bbr->epoch,
+				bbr->lost, bbr->rttProp, bbr->pkt_epoch);
+		} else {
+			fprintf(out, "calcuate rtt:%u -- send_time:%u ack_time:%u frm:%d\n",
+				bbr->flex1,
+				bbr->flex2,
+				bbr->flex3,
+				bbr->flex4);
+		}
 		break;
 	case BBR_LOG_TIMERSTAR:
 		if (show_all_messages) {
@@ -4629,20 +4794,21 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			} else {
 				which_one =  "timer";
 			}
-			fprintf(out, "type:%s(%s:%x) srtt:%d for %u(%u) cw:%u rw:%u (ip:%d iip:%d) slot:%d frm:%d\n",
+			fprintf(out, "type:%s(%s:%u) srtt:%d (rttvar:%u * 4) rttmin:%u for %u(%u) cw:%u rw:%u (ip:%d iip:%d) slot:%d frm:%d\n",
 				mask,
 				which_one, bbr->flex3,
-				bbr->flex1,
+				bbr->flex1, l->tlb_rttvar, bbr->lost,
 				bbr->flex2, bbr->flex4,
 				l->tlb_snd_cwnd, l->tlb_snd_wnd,
 				bbr->inhpts, bbr->ininput,
 				bbr->flex5, bbr->flex8);
 			print_out_space(out);
-			fprintf(out, "t_rxtcur:%u state:%u (u:%u m:%u a:%u pers:%d) line:%d\n",
-				bbr->flex6, l->tlb_state,
+			fprintf(out, "t_rxtcur:%u rxt_shift:%d state:%u (u:%u m:%u a:%u pers:%d) flight:%d must:%d snd_max_at:%u out_at_rto:%u\n",
+				bbr->flex6, bbr->lt_epoch, l->tlb_state,
 				l->tlb_snd_una, l->tlb_snd_max,
 				l->tlb_txbuf.tls_sb_acc,
-				bbr->flex7, bbr->pkts_out);
+				bbr->flex7, bbr->inflight,
+				bbr->pacing_gain, bbr->delivered, bbr->pkts_out);
 			if (bbr->flex3 & PACE_TMR_KEEP) {
 				print_out_space(out);
 				fprintf(out, "KEEP:Sent so far:%u\n",
@@ -4703,6 +4869,11 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 						mask, bbr->flex1, bbr->flex5, bbr->flex3, l->tlb_state, bbr->flex6);
 				}
 			}
+			if (extra_print) {
+				print_out_space(out);
+				fprintf(out, "must:%d snd_max_at:%u out_at_rto:%u\n",
+					bbr->pacing_gain, bbr->delivered, bbr->pkts_out);
+			}
 		}
 		break;
 	case BBR_LOG_BBRSND:
@@ -4731,7 +4902,7 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 				(l->tlb_snd_nxt - l->tlb_snd_una), bbr->flex2, mask, l->tlb_flags);
 		}
 	}
-		break;
+	break;
 	case  TCP_LOG_USERSEND:
 		fprintf(out, "avail:%u pending:%u snd_una:%u snd_max:%u out:%u t_flags:0x%x (ip:%d)\n",
 			l->tlb_txbuf.tls_sb_acc,
@@ -4773,8 +4944,17 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		uint16_t rw_in;
 		uint32_t acks;
 		const char *ackstate, *datastate;
+		const char *ack_type;
+		const char *mflag_type;
 		int have_ack;
 
+		if (bbr->flex7 == 1) {
+			ack_type = "Compressed";
+		} else if (bbr->flex7 == 2) {
+			ack_type = "Normal";
+		} else {
+			ack_type = "Unkown";
+		}
 		last_rwnd_at_out = l->tlb_snd_wnd;
 		if (th) {
 			have_ack = th->th_flags & TH_ACK;
@@ -4788,11 +4968,23 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			th_ack = 0xbadbad;
 			th_seq = 0xbadbad;
 		}
+		if (bbr->flex3 & M_TSTMP) {
+			lro_time = bbr->lt_epoch;
+			mflag_type = "HDWR STAMP";
+		}
+		else if (bbr->flex3 & M_TSTMP_LRO) {
+			lro_time = bbr->flex5;
+			mflag_type = "LRO  STAMP";
+		} else {
+			lro_time = l_timeStamp;
+			mflag_type = "NO  STAMP";
+		}
 		if (!have_ack) {
 			acks = 0;
 			ackstate = "none";
 		} else if (SEQ_GT(th_ack, l->tlb_snd_una)) {
 			acks = th_ack - l->tlb_snd_una;
+			total_log_in += acks;
 			ackstate = "new";
 		} else {
 			acks = 0;
@@ -4809,14 +5001,6 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		} else {
 			datastate = "no-data";
 		}
-		if (bbr->flex3 & M_TSTMP) {
-			lro_time = bbr->lt_epoch;
-		}
-		else if (bbr->flex3 & M_TSTMP_LRO) {
-			lro_time = bbr->flex5;
-		} else {
-			lro_time = l_timeStamp;
-		}
 		if (rack_last_in_set == 0) {
 			rack_last_in = l_timeStamp;
 			rack_last_in_set = 1;
@@ -4825,12 +5009,14 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			rack_arr_in = lro_time;
 			rack_arr_in_set = 1;
 		}
-		fprintf(out, "Acks %u (%s) off:%u out:%u lenin:%u cw:%u rw:%u una:%u ack:%u t_flags:0x%x(%s,%s)\n",
+		fprintf(out, "Ack:%s %u (%s) off:%u out:%u lenin:%u avail:%u cw:%u rw:%u una:%u ack:%u t_flags:0x%x(%s,%s)\n",
+			ack_type,
 			acks,
 			translate_flags(th->th_flags),
 			off_len,
 			(l->tlb_snd_max - l->tlb_snd_una),
 			l->tlb_len,
+			l->tlb_txbuf.tls_sb_acc,
 			l->tlb_snd_cwnd,
 			l->tlb_snd_wnd,
 			l->tlb_snd_una,
@@ -4843,13 +5029,14 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		if (extra_print) {
 			print_out_space(out);
 			mask = get_timer_mask(bbr->flex4);
-			fprintf(out, "mflags:0x%x nxt_pkt:%d hwts=0x%x ats:0x%x hpts_flags:%s(%x) mapa:%u\n",
+			fprintf(out, "mflags:0x%x nxt_pkt:%d hwts=0x%x ats:0x%x hpts_flags:%s(%x) mapa:%u NR:0x%x\n",
 				bbr->flex3,
 				bbr->flex8,
 				bbr->lt_epoch,
 				bbr->flex5,
 				mask,
-				bbr->flex4, bbr->flex2);
+				bbr->flex4,
+				bbr->flex2, bbr->use_lt_bw);
 			print_out_space(out);
 			fprintf(out, "rcv_buf cc:%u snd_buf cc:%u rw_in:%u out:%u inflight:%u\n",
 				l->tlb_rxbuf.tls_sb_acc, l->tlb_txbuf.tls_sb_acc, rw_in,
@@ -4860,19 +5047,31 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			fprintf(out, " th_ack:%u pe:%u th_seq:%u rcv_nxt:%u ssthresh:%u\n",
 				th_ack, bbr->pkt_epoch, th_seq, l->tlb_rcv_nxt, l->tlb_snd_ssthresh);
 			print_out_space(out);
-			fprintf(out, " snd_una:%u snd_max:%u iss:%u sabsum:%lu arrvtsmp:%u (spa:%u ar_spa:%u)\n",
-				l->tlb_snd_una,
-				l->tlb_snd_max,
-				l->tlb_iss, rack_sab_sum, lro_time,
-				(lro_time - rack_arr_in),
-				(l_timeStamp - rack_last_in));
+			if (lro_flush_time) {
+				fprintf(out, " snd_una:%u snd_max:%u iss:%u sabsum:%lu mflags:%s arrvtsmp:%u flush_ts:%u (delay:%u) rec:%u (spa:%u ar_spa:%u)\n",
+					l->tlb_snd_una,
+					l->tlb_snd_max,
+					l->tlb_iss, rack_sab_sum, mflag_type, lro_time, lro_flush_time,
+					(lro_flush_time - lro_time),
+					l->tlb_snd_recover,
+					(lro_time - rack_arr_in),
+					(l_timeStamp - rack_last_in));
+			} else {
+				fprintf(out, " snd_una:%u snd_max:%u iss:%u sabsum:%lu arrvtsmp:%u rec:%u (spa:%u ar_spa:%u)\n",
+					l->tlb_snd_una,
+					l->tlb_snd_max,
+					l->tlb_iss, rack_sab_sum, lro_time,
+					l->tlb_snd_recover,
+					(lro_time - rack_arr_in),
+					(l_timeStamp - rack_last_in));
+			}
 			print_out_space(out);
-			fprintf(out, "avail:%u inq:%u COcR:0x%x (ticks:%u start_tm:%u ago:%u)\n",
+			fprintf(out, "avail:%u inq:%u COcR:0x%x (ticks:%u start_tm:%u ago:%u) ack_type:%u\n",
 				l->tlb_txbuf.tls_sb_acc,
 				l->tlb_rxbuf.tls_sb_acc,
 				bbr->applimited,
 				l->tlb_starttime,
-				l->tlb_ticks, (l->tlb_ticks - l->tlb_starttime));
+				l->tlb_ticks, (l->tlb_ticks - l->tlb_starttime), bbr->cwnd_gain);
 			if (bbr->flex8) {
 				struct timeval reqt, delta;
 
@@ -4888,7 +5087,7 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 					fprintf(out, " end:%lu ]",
 						bbr->bw_inuse);
 				} else
-					  fprintf(out, " ??]");
+					fprintf(out, " ??]");
 				fprintf(out, " sseq:%u",
 					bbr->flex6);
 				if (bbr->flex8 & 4) {
@@ -4936,30 +5135,8 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	case TCP_LOG_REASS:
 		print_tcp_log_reass(l, bbr);
 		break;
-	case TCP_HDWR_TLS:
-		if (bbr->flex8 == 0) {
-			/* TCP m_copy_m logging */
-			if (bbr->flex1)
-				fprintf(out, "goal len:%d updated_len:%d mflags:0x%x mlen:%d off:%u\n",
-					bbr->flex3, bbr->flex4, bbr->flex1, bbr->flex2, bbr->flex5);
-			else
-				fprintf(out, "Final target len:%d final:%d\n", bbr->flex3, bbr->flex4);
-		} else if (bbr->flex8 == 1) {
-			/* BBR logging */
-			fprintf(out, "mode:%d len:%d rw:%u cwnd:%u avail:%u out:%u olen:%u mins:%u maxs:%u sacked:%u\n",
-				bbr->flex7, bbr->flex4,
-				l->tlb_snd_wnd,
-				l->tlb_snd_cwnd,
-				l->tlb_txbuf.tls_sb_acc,
-				(l->tlb_snd_max - l->tlb_snd_una),
-				bbr->flex5,
-				bbr->flex1, bbr->flex3, bbr->flex6);
-		} else {
-			fprintf(out, "PACE SIZE SET min:%u max:%u opt_tls_siz:%u oh:%u frm:%u\n",
-				bbr->flex1,
-				bbr->flex3,
-				bbr->flex4, bbr->flex5, bbr->flex8);
-		}
+	case TCP_HDWR_PACE_SIZE:
+		print_pace_size(l, bbr);
 		break;
 	case TCP_LOG_CONNEND:
 		display_connection_end(l, bbr);
@@ -4977,17 +5154,19 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		else
 			foo = "UNKNOWN";
 		if (bbr->flex8 == 1)
-			fprintf(out, " RACK RTR Reason:%s (%u) start:%u end:%u dupack:%u flags:0x%x\n",
+			fprintf(out, " RACK RTR Reason:%s (%u) start:%u end:%u dupack:%u flags:0x%x must:%d snd_max_at:%u out_at_rto:%u\n",
 				foo,
 				bbr->flex8,
 				bbr->flex5, bbr->flex6,
-				bbr->flex4, bbr->flex3);
+				bbr->flex4, bbr->flex3,
+				bbr->pacing_gain, bbr->delivered, bbr->pkts_out);
 		else
-			fprintf(out, " RACK RTR Reason:%s (%u) start:%u end:%u dupack:%u flags:0x%x line:%d\n",
+			fprintf(out, " RACK RTR Reason:%s (%u) start:%u end:%u dupack:%u flags:0x%x line:%d must:%d snd_max_at:%u out_at_rto:%u\n",
 				foo,
 				bbr->flex8,
 				bbr->flex5, bbr->flex6,
-				bbr->flex4, bbr->flex3, bbr->flex1);
+				bbr->flex4, bbr->flex3, bbr->flex1,
+				bbr->pacing_gain, bbr->delivered, bbr->pkts_out);
 
 		break;
 	}
@@ -4998,6 +5177,9 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		if (th) {
 			th_ack = ntohl(th->th_ack);
 			th_seq = ntohl(th->th_seq);
+			if (use_relative_seq) {
+				th_seq -= l->tlb_iss;
+			}
 		} else {
 			th_ack = 0xbadbad;
 			th_seq = 0xbadbad;
@@ -5008,6 +5190,8 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		if (bbr->flex8) {
 			rtr = "*";
 			lost_rack_count += l->tlb_len;
+		} else {
+			total_log_out += l->tlb_len;
 		}
 		fprintf(out, "Sent(%d) %u:%u%s (%s f:%d) bw:%s(%lu) avail:%d cw:%u scw:%u rw:%u flt:%u (spo:%u ip:%d)\n",
 			l->tlb_errno,
@@ -5026,10 +5210,10 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 				bbr->flex2, bbr->flex3, l->tlb_flags, bbr->flex4, bbr->flex7, bbr->inflight,
 				l->tlb_rxbuf.tls_sb_acc);
 			print_out_space(out);
-			fprintf(out, "Min seg:%u Max seg:%u agg_delay:%u agg_early:%u th_ack:%u out:%u sst:%u iss:%u sal:%d sndcnt:%d\n",
+			fprintf(out, "Min seg:%u Max seg:%u agg_delay:%u agg_early:%u th_ack:%u out:%u sst:%u iss:%u sal:%d sndcnt:%d t_maxseg:%u\n",
 				bbr->flex2, bbr->flex3, bbr->applimited, bbr->flex6, th_ack,
 				(l->tlb_snd_max - l->tlb_snd_una),
-				l->tlb_snd_ssthresh, l->tlb_iss, bbr->delivered, bbr->flex1);
+				l->tlb_snd_ssthresh, l->tlb_iss, bbr->delivered, bbr->flex1, bbr->pkts_out);
 			if (th) {
 				optptr = (const uint8_t *)th;
 				optptr += sizeof(struct tcphdr);
@@ -5337,25 +5521,26 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		break;
 	case BBR_LOG_RTO:
 		val = bbr->flex8;
-
 		if (val == 0xff) {
-			fprintf(out, "User Closes inp:%d ini:%d state:%d newstate:%d so_error:%d\n",
+			fprintf(out, "User Closes inp:%d ini:%d state:%d newstate:%d so_error:%d must:%d snd_max_at:%u out_at_rto:%u\n",
 				bbr->inhpts,
 				bbr->ininput,
 				bbr->flex1,
 				bbr->flex2,
-				bbr->flex3);
+				bbr->flex3,
+				bbr->pacing_gain, bbr->delivered, bbr->pkts_out);
 		} else {
 			if (val > 6)
 				val = 0;
-			fprintf(out, "Type:%s min_rtt:%u rack_rtt:%u out:%u cw:%u rw:%u t_flags:0x%x out:%d (ip:%d) state:%u prr:%u\n",
+			fprintf(out, "Type:%s min_rtt:%u rack_rtt:%u out:%u cw:%u rw:%u t_flags:0x%x out:%d (ip:%d) state:%u prr:%u must:%d snd_max_at:%u out_at_rto:%u\n",
 				timer_types[val],
 				bbr->flex1,
 				bbr->flex2,
 				(l->tlb_snd_max - l->tlb_snd_una),
 				l->tlb_snd_cwnd,
 				l->tlb_snd_wnd, l->tlb_flags,
-				(l->tlb_snd_max - l->tlb_snd_una), bbr->inhpts, l->tlb_state, bbr->flex5);
+				(l->tlb_snd_max - l->tlb_snd_una), bbr->inhpts, l->tlb_state, bbr->flex5,
+				bbr->pacing_gain, bbr->delivered, bbr->pkts_out);
 		}
 		break;
 	case BBR_LOG_BBRRTT:
@@ -5363,7 +5548,14 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		int32_t new_rtt_diff;
 		double norm_grad;
 		const char *override;
+		uint64_t bw, rtt, calc_bw;
 
+		bw = l->tlb_snd_wnd;
+		if (bw > l->tlb_snd_cwnd)
+			bw =  l->tlb_snd_cwnd;
+		calc_bw = bw * 1000000;
+		rtt = bbr->flex1;
+		calc_bw /= rtt;
 		last_rtt_measure = bbr->flex1;
 		if (prtt_set == 0) {
 			prtt_set = 1;
@@ -5401,21 +5593,21 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		} else {
 			override = "USE GRAD";
 		}
-		fprintf(out, "rtt:%u len:%u avail:%u flight:%u (ip:%d) state:%u prr:%u NG:%f(%s) conf:%u\n",
+		fprintf(out, "rtt:%u len:%u avail:%u flight:%u (ip:%d) state:%u prr:%u NG:%f(%s) conf:%u (max poss bw %s with win:%lu)\n",
 			bbr->flex1,
 			bbr->flex2,
 			l->tlb_txbuf.tls_sb_acc,
 			bbr->inflight,
 			bbr->inhpts, l->tlb_state, bbr->pkts_out,
-			norm_grad, ((norm_grad <= 0.0) ? "INC" : "DEC"), bbr->flex7
-			);
+			norm_grad, ((norm_grad <= 0.0) ? "INC" : "DEC"), bbr->flex7, display_bw(calc_bw, 0), bw);
 		if (extra_print) {
+			uint32_t arrv, snd;
 			print_out_space(out);
-			fprintf(out, " cw:%u sst:%u start:%u end:%u rtt_diff:%d nrtt_diff:%d %s f4:%u f5:%u\n",
+			fprintf(out, " cw:%u sst:%u start:%u end:%u rtt_diff:%d nrtt_diff:%d %s f4:%u f5:%u minrtt:%u rttcnt:%d\n",
 				l->tlb_snd_cwnd, l->tlb_snd_ssthresh,
 				bbr->pkt_epoch, bbr->lost,
 				rtt_diff, new_rtt_diff, override, bbr->flex4,
-				bbr->flex5);
+				bbr->flex5, bbr->flex3, bbr->delivered);
 			print_out_space(out);
 			fprintf(out,
 				"tar:%u prtt_st:%u flags:0x%x (Hibuf,Fora,Gpdy,Inprtt,Measaw,Appl,GPfill,Dragged)\n",
@@ -5423,13 +5615,17 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 				bbr->epoch,
 				bbr->use_lt_bw);
 			print_out_space(out);
+			arrv = ((bbr->bw_inuse >> 32) & 0x00000000ffffffff);
+			snd = (bbr->bw_inuse & 0x00000000ffffffff);
 			fprintf(out,
-				"prtt_en:%u (ago:%u) gain:%u low_rtt_us:%lu gp_srtt:%lu\n",
+				"prtt_en:%u (ago:%u) low_rtt_us:%lu gp_srtt:%lu rtr_cnt:%d arr:%u snd:%u rsm_flags:0x%x\n",
 				bbr->lt_epoch,
 				(bbr->timeStamp - bbr->lt_epoch),
-				bbr->pacing_gain,
 				bbr->cur_del_rate,
-				bbr->delRate);
+				bbr->delRate,
+				bbr->cwnd_gain,
+				arrv, snd,
+				bbr->pacing_gain);
 		}
 		break;
 	}
@@ -5459,7 +5655,6 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 
 	if (l->tlb_eventid == BBR_LOG_RTT_SHRINKS) {
 		dump_log_entry(l, th);
-		force_bbr = 1;
 		return;
 	}
 	if (l->tlb_eventid == TCP_LOG_RTO) {
@@ -5646,6 +5841,9 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	case TCP_LOG_CONNEND:
 		display_connection_end(l, bbr);
 		break;
+	case TCP_HDWR_PACE_SIZE:
+		print_pace_size(l, bbr);
+		break;
 	case TCP_LOG_OUT:
 	{
 		char rtr;
@@ -5653,6 +5851,9 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		if (th) {
 			th_ack = ntohl(th->th_ack);
 			th_seq = ntohl(th->th_seq);
+			if (use_relative_seq) {
+				th_seq -= l->tlb_iss;
+			}
 			off_len = th->th_off << 2;
 			flags_out = translate_flags(th->th_flags);
 		} else {
@@ -5964,7 +6165,7 @@ main(int argc, char **argv)
 	memset(time_in_sub_states, 0, sizeof(time_in_sub_states));
 	out = stdout;
 	memset(stack_cnts, 0, sizeof(stack_cnts));
-	while ((i = getopt(argc, argv, "A:b:d:D:ef:Fi:lL:mMN:o:OprRs:S:tTUw:WxYzZ:?")) != -1) {
+	while ((i = getopt(argc, argv, "A:b:cCd:D:ef:Fi:lL:mMN:o:OprRs:S:tTUw:WxYzZ:?")) != -1) {
 		switch (i) {
 		case 'A':
 			record_num_start = strtoul(optarg, NULL, 0);
@@ -5973,6 +6174,12 @@ main(int argc, char **argv)
 		case 'b':
 			first_time = strtoul(optarg, NULL, 0);
 			first_time_set = 1;
+			break;
+		case 'c':
+			use_relative_seq = 1;
+			break;
+		case 'C':
+			lro_flush_is_ms = 1;
 			break;
 		case 'd':
 			dirname = optarg;
@@ -6437,6 +6644,7 @@ main(int argc, char **argv)
 		fprintf(dump_out_sack, "QUIT\n");
 		fclose(dump_out_sack);
 	}
+	fprintf(out, "Total RACK IN:%lu OUT:%lu\n", total_log_in, total_log_out);
 	if (out != stdout)
 		fclose(out);
 	if (show_msg_stats) {
