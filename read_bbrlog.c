@@ -84,7 +84,7 @@ static int use_monolithic_time = 0;
 /*#define BBR_RED_BW_REC_ENDCLL	 6	 Recover exits save high if needed an clear to start measuring */
 /*#define BBR_RED_BW_PE_NOEARLY_OUT 7	 Set pkt epoch judged that we do not get out of jail early */
 
-
+#ifdef NETFLIX_TCP_STACK
 static const char *tcp_accounting_names[] = {
 	"ACK_BEHIND",
 	"ACK_SACK",
@@ -116,6 +116,7 @@ static const char *tcp_cycle_names[] = {
 	"CYC_HANDLE_MAP",
 	"CYC_HANDLE_ACK"
 };
+#endif
 
 static const char *map_chg_names[] = {
 	"None",
@@ -2040,6 +2041,7 @@ handle_user_type_unknown(const struct tcp_log_buffer *l)
 	fprintf(out, "Unknown user type %u\n", l->tlb_flex1);
 }
 
+#endif
 static void
 show_hystart(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
 {
@@ -2152,6 +2154,7 @@ print_pace_size(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
 	}
 }
 
+#ifdef NETFLIX_TCP_STACK
 static void
 handle_user_event_log_entry(const struct tcp_log_buffer *l)
 {
@@ -2187,10 +2190,12 @@ dump_accounting(const struct tcp_log_buffer *l)
 	fprintf(out, "%s type:%s:\n", evt_name(l->tlb_eventid), acct_type);
 	for (i = 0; i < limit; i++) {
 		print_out_space(out);
+#ifdef NETFLIX_TCP_STACK
 		fprintf(out, "%s:%lu\n",
 			((l->tlb_flex2 == 2) ?
 			 tcp_cycle_names[i] : tcp_accounting_names[i]),
 			l->tlb_stackinfo.u64_raw.u64_flex[i]);
+#endif
 	}
 }
 
