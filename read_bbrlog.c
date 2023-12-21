@@ -588,7 +588,7 @@ get_timer_mask(uint32_t tmask)
 
 
 static char *
-translate_flags(uint8_t flags)
+translate_flags(uint16_t flags)
 {
 	static char flagbuf[256];
 	memset(flagbuf, 0, sizeof(flagbuf));
@@ -639,6 +639,12 @@ translate_flags(uint8_t flags)
 			strcat(flagbuf, "|");
 		strcat(flagbuf, "CWR");
 		buf_at += 3;
+	}
+	if (flags & TH_AE) {
+		if (buf_at)
+			strcat(flagbuf, "|");
+		strcat(flagbuf, "AE");
+		buf_at += 2;
 	}
 	if (buf_at == 0)
 		strcat(flagbuf, "NON");
@@ -3804,7 +3810,7 @@ backwards:
 		last_rwnd_at_out = l->tlb_snd_wnd;
 		snd_una = l->tlb_snd_una;
 		if (th) {
-			ackflags = translate_flags(th->th_flags);
+			ackflags = translate_flags(tcp_get_flags(th));
 			have_ack = th->th_flags & TH_ACK;
 			th_ack = ntohl(th->th_ack);
 			th_seq = ntohl(th->th_seq);
@@ -4065,7 +4071,7 @@ backwards:
 			fprintf(out, "Sent(e:%d) %u:%u%c (%s:%d) flt:%u avail:%d (spo:%u ip:%d rdhu:0x%x %s(%lu) pg:%u piw:%d pd:%d d:%d)\n",
 				l->tlb_errno,
 				th_seq, l->tlb_len, foo,
-				translate_flags(th->th_flags), l->tlb_errno,
+				translate_flags(tcp_get_flags(th)), l->tlb_errno,
 				bbr->inflight,
 				l->tlb_txbuf.tls_sb_acc,
 				sub, bbr->inhpts,
@@ -6558,7 +6564,7 @@ backward:
 		fprintf(out, "Ack:%s %u (%s) off:%u out:%u lenin:%u avail:%u cw:%u rw:%u una:%u ack:%u t_flags:0x%x(%s,%s)\n",
 			ack_type,
 			acks,
-			translate_flags(th->th_flags),
+			translate_flags(tcp_get_flags(th)),
 			off_len,
 			(l->tlb_snd_max - l->tlb_snd_una),
 			l->tlb_len,
@@ -6820,7 +6826,7 @@ backward:
 		fprintf(out, "Sent(%d) %u:%u%s (%s fas:%u bas:%u) bw:%s(%lu) avail:%d cw:%u scw:%u rw:%u flt:%u (spo:%u ip:%d)\n",
 			l->tlb_errno,
 			th_seq, l->tlb_len, rtr,
-			translate_flags(th->th_flags), bbr->flex5,  bbr->bbr_substate,
+			translate_flags(tcp_get_flags(th)), bbr->flex5,  bbr->bbr_substate,
 			display_bw(bbr->bw_inuse, 0), bbr->bw_inuse,
 			l->tlb_txbuf.tls_sb_acc,
 			l->tlb_snd_cwnd,
@@ -7547,7 +7553,7 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		}
 		fprintf(out, "Acks %u (%s) off:%u out:%u lenin:%u avail:%u cw:%u rw:%u th_seq:%u una:%u th_ack:%u rto:%u srtt:%u state:%d\n",
 			(th_ack - snd_una),
-			translate_flags(th->th_flags),
+			translate_flags(tcp_get_flags(th)),
 			off_len,
 			(l->tlb_snd_max - l->tlb_snd_una),
 			l->tlb_len,
@@ -7603,7 +7609,7 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 				th_seq -= l->tlb_iss;
 			}
 			off_len = th->th_off << 2;
-			flags_out = translate_flags(th->th_flags);
+			flags_out = translate_flags(tcp_get_flags(th));
 		} else {
 			th_ack = 0xbadbad;
 			th_seq = 0xbadbad;
