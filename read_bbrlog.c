@@ -47,6 +47,10 @@ static const char *prurequests[] = {
 };
 
 #include <bbparse.h>
+
+#define	tcp_get_flags(th)		__tcp_get_flags(th)
+#define	tcp_set_flags(th, flags)	__tcp_set_flags(th, flags)
+
 static uint32_t lowest_delta = 0xffffffff;
 static uint32_t highest_delta = 0;
 static int32_t showExtraInfo = 0;
@@ -282,7 +286,7 @@ static const char *log_names[MAX_TYPES] = {
 	"TCP_RACK_LOG_COLLAPSE", /* 67 */
 	"RACK_TP_TRIGGERED",	/* 68 */
 	"TCP_HYBRID_PACING",	/* 69 */
-	"TCP_LOG_PRU"		/* 70 */
+	"TCP_LOG_PRU",		/* 70 */
 };
 
 static uint32_t time_last_setting = 0;
@@ -588,7 +592,7 @@ get_timer_mask(uint32_t tmask)
 
 
 static char *
-translate_flags(uint8_t flags)
+translate_flags(uint16_t flags)
 {
 	static char flagbuf[256];
 	memset(flagbuf, 0, sizeof(flagbuf));
@@ -639,6 +643,12 @@ translate_flags(uint8_t flags)
 			strcat(flagbuf, "|");
 		strcat(flagbuf, "CWR");
 		buf_at += 3;
+	}
+	if (flags & TH_AE) {
+		if (buf_at)
+			strcat(flagbuf, "|");
+		strcat(flagbuf, "AE");
+		buf_at += 2;
 	}
 	if (buf_at == 0)
 		strcat(flagbuf, "NON");
@@ -1492,13 +1502,13 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_RACK_PACE_MIN_SEG");
 	} else if (opt == TCP_RACK_DGP_IN_REC) {
 		return ("TCP_RACK_DGP_IN_REC");
-	} else if (opt == TCP_RXT_CLAMP) {
-		return ("TCP_RXT_CLAMP");
 	} else if (opt == TCP_HYBRID_PACING) {
 		return ("TCP_HYBRID_PACING");
 	} else if (opt == TCP_PACING_DND) {
 		return ("TCP_PACING_DND");
 #ifdef NETFLIX_TCP_STACK
+	} else if (opt == TCP_POLICER_DETECT) {
+		return ("TCP_POLICER_DETECT");
 	} else if (opt == TCP_SS_EEXIT) {
 		return ("TCP_SS_EEXIT");
 	} else if (opt == TCP_NO_TIMELY) {
@@ -1509,6 +1519,8 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_REC_IS_DYN");
 	} else if (opt == TCP_FILLCW_RATE_CAP) {
 		return ("TCP_FILLCW_RATE_CAP");
+	} else if (opt == TCP_POLICER_MSS) {
+		return ("TCP_POLICER_MSS");
 #endif
 	} else {
 		static char buf[128];
@@ -2225,6 +2237,9 @@ hybrid_flags(uint32_t flags)
 		strcat(buf, "|HINT_MSS");
 	}
 #ifdef NETFLIX_TCP_STACK
+	if (flags & TCP_HAS_PLAYOUT_MS) {
+		strcat(buf, "|PLAY_MS");
+	}
 	if (flags & TCP_HYBRID_PACING_SENDTIME) {
 		strcat(buf, "|USE_ST");
 	}
@@ -2262,7 +2277,6 @@ get_hybrid_pacing_flags(uint8_t flg)
 	}
 	return (flags_ret);
 }
-
 
 static void
 display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
@@ -2376,12 +2390,12 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 			sent, rxt, bbr->bbr_substate, get_hybrid_pacing_flags(bbr->bbr_state));
 		if (extra_print) {
 			print_out_space(out);
-			fprintf(out, "sent_cur:%lu sent_fs:%lu rxt_cur:%lu rxt_fs:%lu last_send_time:%lu f5:%u pe:%u\n",
+			fprintf(out, "sent_cur:%lu sent_fs:%lu rxt_cur:%lu rxt_fs:%lu last_send_time:%lu f5:%u pe:%u play_ms:%u\n",
 				bbr->cur_del_rate,
 				bbr->delRate,
 				bbr->rttProp,
 				bbr->bw_inuse, last_send_time,
-				bbr->flex5, bbr->pkt_epoch);
+				bbr->flex5, bbr->pkt_epoch, bbr->lost);
 		}
 	} else if (bbr->flex8 == HYBRID_LOG_BW_MEASURE) {
 		/* the measure is special */
@@ -2720,6 +2734,9 @@ handle_user_type_unknown(const struct tcp_log_buffer *l)
 
 static uint64_t last_rxt_known = 0;
 static uint64_t last_snt_known = 0;
+static uint64_t pol_detection_txt = 0;
+static uint64_t pol_detection_rxt = 0;
+
 
 static void
 show_hystart(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
@@ -2751,8 +2768,8 @@ show_hystart(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
 		fprintf(out, " -- CSS is active increment is reduced to %u cwnd:%u\n",
 			bbr->flex1, l->tlb_snd_cwnd);
 	} else if (bbr->flex8 == 4) {
-		fprintf(out, " -- New round begins round:%u cwnd:%u ssthresh:%u\n",
-			bbr->flex1, l->tlb_snd_cwnd, l->tlb_snd_ssthresh);
+		fprintf(out, " -- New round begins round:%u ends:%u cwnd:%u ssthresh:%u\n",
+			bbr->flex1, bbr->flex2, l->tlb_snd_cwnd, l->tlb_snd_ssthresh);
 	} else if (bbr->flex8 == 5) {
 		fprintf(out, " -- RTT Sample rtt:%u smallest-rtt:%u flags:0x%x cwnd:%u\n",
 			bbr->flex1, bbr->flex2, bbr->flex7, l->tlb_snd_cwnd);
@@ -2774,22 +2791,49 @@ show_hystart(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
 			l->tlb_snd_max,
 			l->tlb_iss);
 	} else if (bbr->flex8 == 21) {
-		double top, bot, per_oa, per_rnd;
+		double top, bot, per_oa, per_rnd, per_pd;
 		
 		top = bbr->delRate * 100.0;
 		bot = bbr->cur_del_rate * 1.0;
-		per_oa = top / bot;
+		if (bot > 0.0) {
+			per_oa = top / bot;
+		} else {
+			if (top > 0.0) {
+				per_oa = 100000.0;;
+			} else {
+				per_oa = 0.0;
+			}
+		}
 		top = (bbr->delRate - last_rxt_known) * 100.0;
 		bot = (bbr->cur_del_rate - last_snt_known) * 1.0;
-		per_rnd = top / bot;
-		fprintf(out, " -- New round setup Rnd:%u s:%lu r:%lu cw:%u [%.4f] thisrnd s:%lu r:%lu [%.4f]\n",
+		if (bot > 0.0) {
+			per_rnd = top / bot;
+		} else {
+			if (top > 0.0) {
+				per_rnd = 100000.0;
+			} else {
+				per_rnd = 0.0;
+			}
+		}
+		top = ((bbr->delRate - pol_detection_rxt)  * 100.0);
+		bot = ((bbr->cur_del_rate - pol_detection_txt) * 1.0);
+		if (bot > 0.0) {
+			per_pd = top / bot;
+		} else {
+			if (top > 0.0) {
+				per_pd = 100000.0;
+			} else {
+				per_pd = 0.0;
+			}
+		}
+		fprintf(out, " -- NR setup r:%u (s:%lu r:%lu [%.4f]) cw:%u t_r_ (s:%lu r:%lu [%.4f]) [since_pd[%.4f]]\n",
 			bbr->flex1,
 			bbr->cur_del_rate,
 			bbr->delRate,
-			l->tlb_snd_cwnd,
 			per_oa,
+			l->tlb_snd_cwnd,
 			(bbr->cur_del_rate - last_snt_known),
-			(bbr->delRate - last_rxt_known), per_rnd);
+			(bbr->delRate - last_rxt_known), per_rnd, per_pd);
 		print_out_space(out);
 		fprintf(out, "ends_at:%u highseq:%u cur_snd_max:%u\n",
 			bbr->flex2, bbr->flex3, bbr->flex4);
@@ -3804,7 +3848,7 @@ backwards:
 		last_rwnd_at_out = l->tlb_snd_wnd;
 		snd_una = l->tlb_snd_una;
 		if (th) {
-			ackflags = translate_flags(th->th_flags);
+			ackflags = translate_flags(tcp_get_flags(th));
 			have_ack = th->th_flags & TH_ACK;
 			th_ack = ntohl(th->th_ack);
 			th_seq = ntohl(th->th_seq);
@@ -4065,7 +4109,7 @@ backwards:
 			fprintf(out, "Sent(e:%d) %u:%u%c (%s:%d) flt:%u avail:%d (spo:%u ip:%d rdhu:0x%x %s(%lu) pg:%u piw:%d pd:%d d:%d)\n",
 				l->tlb_errno,
 				th_seq, l->tlb_len, foo,
-				translate_flags(th->th_flags), l->tlb_errno,
+				translate_flags(tcp_get_flags(th)), l->tlb_errno,
 				bbr->inflight,
 				l->tlb_txbuf.tls_sb_acc,
 				sub, bbr->inhpts,
@@ -5410,19 +5454,19 @@ backward:
 				l->tlb_snd_cwnd, l->tlb_snd_ssthresh,
 				bbr->pkt_epoch, bbr->bbr_state);
 			print_out_space(out);
-			fprintf(out, " rnds:%u min_rnds:%u rack_rtt:%u rxts:%lu snds:%lu thresh:%lu ltbw:%s (%lu)\n",
+			fprintf(out, " rnds:%u min_rnds:%u rack_rtt:%u rxts:%lu snds:%lu thresh:%lu del_bw:%s (%lu) avg_rxt_cnt:%u\n",
 				bbr->flex3, bbr->flex4,
 				bbr->flex5,
 				bbr->cur_del_rate, bbr->delRate,
 				bbr->rttProp,
-				display_bw(bbr->bw_inuse, 0), bbr->bw_inuse);
+				display_bw(bbr->bw_inuse, 0), bbr->bw_inuse, bbr->flex7);
 			print_out_space(out);
 			stored_gp = bbr->lt_epoch;
 			stored_gp <<= 32;
 			stored_gp |= bbr->pkts_out;
-			fprintf(out, "Clamps applied:%u Max:%u clamp options 0x%x gpbw:%s (%lu)\n",
-				bbr->delivered, bbr->applimited,bbr->epoch,
-				display_bw(stored_gp, 0), stored_gp);
+			fprintf(out, "Clamps applied:%u Max:%u gp_bw:%s (%lu) min_to:%u\n",
+				bbr->delivered, bbr->applimited, 
+				display_bw(stored_gp, 0), stored_gp, bbr->epoch);
 		} else if (bbr->flex8 == 6) {
 			uint64_t bw;
 
@@ -6071,6 +6115,15 @@ backward:
 				bbr->flex2, bbr->flex1,
 				display_bw(bbr->bw_inuse, 0),
 				bbr->bw_inuse, bbr->rttProp, bbr->bbr_substate);
+		} else if (bbr->flex8 == 89) {
+			uint32_t buck_max, cur_buck;
+			
+			buck_max = (bbr->delRate & 0x00000000ffffffff);
+			cur_buck = ((bbr->delRate >> 32) & 0x00000000ffffffff);
+			fprintf(out, "Policed pacing at bw:%s (%lu) bucket_max:%u current_bucket:%u len:%u delay:%u\n",
+				display_bw(bbr->bw_inuse, 0), bbr->bw_inuse,
+				buck_max, cur_buck,
+				bbr->flex2, bbr->flex1);
 		} else if (bbr->flex8 == 99) {
 			fprintf(out, "SRTT:%u overrides pacing time:%u minrtt:%u\n",
 				bbr->flex2, bbr->flex1, bbr->pkts_out);
@@ -6085,11 +6138,12 @@ backward:
 			uint32_t delta;
 
 			delta = bbr->timeStamp - recovery_entered;
-			fprintf(out, "EXIT RECOVERY cw_before_exit:%u rw:%u ssthresh:%u cw:%u NR:0x%x flight:%u (time to rec:%u)\n",
+			fprintf(out, "EXIT RECOVERY cw_before_exit:%u rw:%u ssthresh:%u cw:%u NR:0x%x flight:%u (time to rec:%u) line:%u\n",
 				bbr->pkts_out, l->tlb_snd_wnd,
 				l->tlb_snd_ssthresh,
 				l->tlb_snd_cwnd,
-				bbr->use_lt_bw, bbr->inflight, delta);
+				bbr->use_lt_bw, bbr->inflight, delta,
+				bbr->flex7);
 		} else if (bbr->flex8 == 15) {
 			recovery_entered = bbr->timeStamp;
 			fprintf(out, "ENTER RECOVERY cw_before_entry:%u rw:%u ssthresh:%u cw:%u NR:0x%x flight:%u line:%u\n",
@@ -6482,6 +6536,7 @@ backward:
 		const char *ackstate, *datastate;
 		const char *ack_type;
 		const char *mflag_type;
+		const char *tflags;
 		int have_ack;
 
 		if (bbr->flex7 == 1) {
@@ -6506,12 +6561,14 @@ backward:
 				th_ack -= l->tlb_iss;
 				snd_una -= l->tlb_iss;
 			}
+			tflags = translate_flags(tcp_get_flags(th));
 			rw_in = ntohs(th->th_win);
 			off_len = th->th_off << 2;
 		} else {
 			have_ack = 0;
 			off_len = 0;
 			th_ack = 0xbadbad;
+			tflags = "bad";
 			th_seq = 0xbadbad;
 		}
 		if (bbr->flex3 & M_TSTMP) {
@@ -6558,7 +6615,7 @@ backward:
 		fprintf(out, "Ack:%s %u (%s) off:%u out:%u lenin:%u avail:%u cw:%u rw:%u una:%u ack:%u t_flags:0x%x(%s,%s)\n",
 			ack_type,
 			acks,
-			translate_flags(th->th_flags),
+			tflags,
 			off_len,
 			(l->tlb_snd_max - l->tlb_snd_una),
 			l->tlb_len,
@@ -6820,7 +6877,7 @@ backward:
 		fprintf(out, "Sent(%d) %u:%u%s (%s fas:%u bas:%u) bw:%s(%lu) avail:%d cw:%u scw:%u rw:%u flt:%u (spo:%u ip:%d)\n",
 			l->tlb_errno,
 			th_seq, l->tlb_len, rtr,
-			translate_flags(th->th_flags), bbr->flex5,  bbr->bbr_substate,
+			translate_flags(tcp_get_flags(th)), bbr->flex5,  bbr->bbr_substate,
 			display_bw(bbr->bw_inuse, 0), bbr->bw_inuse,
 			l->tlb_txbuf.tls_sb_acc,
 			l->tlb_snd_cwnd,
@@ -7547,7 +7604,7 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		}
 		fprintf(out, "Acks %u (%s) off:%u out:%u lenin:%u avail:%u cw:%u rw:%u th_seq:%u una:%u th_ack:%u rto:%u srtt:%u state:%d\n",
 			(th_ack - snd_una),
-			translate_flags(th->th_flags),
+			translate_flags(tcp_get_flags(th)),
 			off_len,
 			(l->tlb_snd_max - l->tlb_snd_una),
 			l->tlb_len,
@@ -7603,7 +7660,7 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 				th_seq -= l->tlb_iss;
 			}
 			off_len = th->th_off << 2;
-			flags_out = translate_flags(th->th_flags);
+			flags_out = translate_flags(tcp_get_flags(th));
 		} else {
 			th_ack = 0xbadbad;
 			th_seq = 0xbadbad;
