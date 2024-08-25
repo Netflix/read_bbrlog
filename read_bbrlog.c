@@ -221,7 +221,7 @@ static const char *log_names[MAX_TYPES] = {
 	"PKT_OUT   ", /* Transmit (without other event)  2 */
 	"RTO       ", /* Retransmit timeout              3 */
 	"SOWAKE    ", /* We wokeup a socket buffer       4 */
-	"BAD_RETRAN", /* Detected bad retransmission 5 */
+	"TCP_UNUSED_5", /* Detected bad retransmission   5 */
 	"PRR       ", /* Doing PRR                       6 */
 	"REORDER   ", /* Detected reorder                7 */
 	"PACER     ", /* Pacer sending a packet          8 */
@@ -4053,7 +4053,6 @@ backwards:
 			fprintf(dump_out_sack, "RXT\n");
 		}
 		break;
-	case TCP_LOG_BAD_RETRAN:
 	case TCP_LOG_PRR:
 	case TCP_LOG_REORDER:
 	case TCP_LOG_HPTS:
@@ -7246,7 +7245,6 @@ backward:
 		break;
 	}
 	default:
-	case TCP_LOG_BAD_RETRAN:
 	case TCP_LOG_PRR:
 	case TCP_LOG_REORDER:
 	case TCP_LOG_HPTS:
@@ -7340,7 +7338,6 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	fprintf(out, "%u %u def [%u] %s ",  l->tlb_ticks, number_flow, timeoff, evt_name(id));
 	switch (id) {
 	default:
-	case TCP_LOG_BAD_RETRAN:
 	case TCP_LOG_PRR:
 	case TCP_LOG_REORDER:
 	case TCP_LOG_HPTS:
