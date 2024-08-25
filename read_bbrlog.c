@@ -228,7 +228,7 @@ static const char *log_names[MAX_TYPES] = {
 	"BBRUPD    ", /* We updated BBR info     9 */
 	"BBRSND    ", /* We did a slot calculation and sending is done 10 */
 	"ACKCLEAR  ", /* A ack clears all outstanding     11 */
-	"INQUEUE   ", /* The tcb had a packet input to it 12 */
+	"TCP_UNUSED_12", /* The tcb had a packet input to it 12 */
 	"TIMERSTAR ", /* Start a timer                    13 */
 	"TIMERCANC ", /* Cancel a timer                   14 */
 	"ENTREC    ", /* Entered recovery                 15 */
@@ -4493,26 +4493,6 @@ backwards:
 			fprintf(dump_out_sack, "EXIT\n");
 		}
 		break;
-	case BBR_LOG_INQUEUE:
-		assert(bbr->bbr_state < 6);
-		if (show_all_messages) {
-			fprintf(out, "avail:%u cw:%u rw:%u (ip:%d ult:%d) pe:%u cpu:%d nseg:%d p_cpu:0x%x\n",
-				l->tlb_txbuf.tls_sb_acc,
-				l->tlb_snd_cwnd,
-				l->tlb_snd_wnd,
-				bbr->inhpts, bbr->use_lt_bw,
-				bbr->pkt_epoch,
-				bbr->flex2,
-				bbr->flex1,
-				bbr->flex3);
-			if (extra_print) {
-				print_out_space(out);
-				fprintf(out, "p_icpu:%x set:%x pr:%d\n",
-					bbr->flex4,
-					bbr->flex5, bbr->flex6);
-			}
-		}
-		break;
 	case BBR_LOG_TIMERSTAR:
 		if (show_all_messages) {
 			const char *which_one;
@@ -7250,7 +7230,6 @@ backward:
 	case BBR_LOG_PERSIST:
 	case BBR_LOG_PKT_EPOCH:
 	case BBR_LOG_ACKCLEAR:
-	case BBR_LOG_INQUEUE:
 	case BBR_LOG_ENTREC:
 	case BBR_LOG_EXITREC:
 	case BBR_LOG_BWSAMP:
@@ -7344,7 +7323,6 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	case BBR_LOG_PKT_EPOCH:
 	case BBR_LOG_BBRUPD:
 	case BBR_LOG_ACKCLEAR:
-	case BBR_LOG_INQUEUE:
 	case BBR_LOG_TIMERCANC:
 	case BBR_LOG_ENTREC:
 	case BBR_LOG_EXITREC:
