@@ -265,7 +265,7 @@ static const char *log_names[MAX_TYPES] = {
 	"BBR_STARTUP_LOG",     /* 46 */
 	"TCP_LOG_RTT",	       /* 47 */
 	"BBR_SETTINGS",		/* 48 */
-	"BBR_SRTT_GAIN_EVENT",	/* 49 */
+	"TCP_UNUSED_49",	/* 49 */
 	"TCP_LOG_REASS", 	/* 50 */
  	"TCP_PACE_SIZE",	/* 51 */
 	"BBR_TCP_HDWR_PACE",	/* 52 */
@@ -3348,40 +3348,6 @@ backwards:
 			show_pacer_diag(bbr);
 		}
 		break;
-	case BBR_LOG_SRTT_GAIN_EVENT:
-	{
-		const char *method;
-		char bogons[100];
-		char *dr, *inuse;
-		if (bbr->flex8 == 0)
-			method = "Feature Disabled";
-		else if (bbr->flex8 == 1)
-			method = "Gaining";
-		else if (bbr->flex8 == 2)
-			method = "Continued Gain";
-		else if (bbr->flex8 == 3)
-			method = "Reducing";
-		else if (bbr->flex8 == 4)
-			method = "Neither";
-		else if (bbr->flex8 == 5)
-			method = "Release reduction";
-		else {
-			sprintf(bogons, "New Unknown %d", bbr->flex8);
-			method = bogons;
-		}
-		inuse = display_bw(bbr->bw_inuse, 1);
-		dr = display_bw(bbr->delRate, 1);
-		fprintf(out, " %s:%u delta:%u ndelta:%u s7-srtt:%u s2-srtt:%u icnt:%u gain_cnt:%u red:%u DR:%s AR:%s\n",
-			method, bbr->flex7,
-			bbr->flex1, bbr->flex2,
-			bbr->flex3, bbr->flex4,
-			bbr->flex5, bbr->flex6, bbr->pkts_out, dr, inuse);
-		if (inuse)
-			free(inuse);
-		if (dr)
-			free(dr);
-		break;
-	}
 	case BBR_LOG_BBRTSO:
 		if (show_all_messages) {
 			if ((bbr->flex8 & 0x80) == 0)
