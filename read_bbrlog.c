@@ -275,7 +275,7 @@ static const char *log_names[MAX_TYPES] = {
 	"SACK_FILTER_RESULT",	/* 56 */
 	"TCP_SAD_DETECTION",	/* 57 */
 	"TCP_TIMELY_WORK",	/* 58 */
-	"USER_LOG  ",		/* 59 */
+	"TCP_UNUSED_59",	/* 59 */
 	"SENDFILE  ",		/* 60 */
 	"TCP_LOG_REQ_T",	/* 61 */
 	"TCP_ACCOUNTING",	/* 62 */
@@ -2689,49 +2689,6 @@ handle_sendfile_log_entry(const struct tcp_log_buffer *l)
 		sf->offset, sf->length, sf->flags, start, end);
 }
 
-static void
-handle_user_type_httpd(const struct tcp_log_buffer *l)
-{
-	const union tcp_log_userdata *data;
-
-	data = (const union tcp_log_userdata *)&l->tlb_stackinfo.u_raw;
-	/* tlb_flex2 has the subtype */
-	switch (l->tlb_flex2) {
-	case TCP_LOG_HTTPD_TS:
-		fprintf(out, "ts: %"PRIu64 "\n", data->tcp_req.timestamp);
-		break;
-	case TCP_LOG_HTTPD_TS_REQ:
-	{
-		/* print timestamp */
-		fprintf(out, "tm: %"PRIu64, data->tcp_req.timestamp);
-		/* print range */
-		fprintf(out, " range: [ ");
-		if (data->tcp_req.flags & TCP_LOG_HTTPD_RANGE_START)
-			fprintf(out, "%"PRIu64, data->tcp_req.start);
-		fprintf(out, "-");
-		if (data->tcp_req.flags & TCP_LOG_HTTPD_RANGE_END)
-			fprintf(out, "%"PRIu64, data->tcp_req.end);
-		/* The range request is inclusive so we add 1 */
-		if ((data->tcp_req.flags & TCP_LOG_HTTPD_RANGE_END) &&
-		    (data->tcp_req.flags & TCP_LOG_HTTPD_RANGE_START))
-			fprintf(out, " (len:%lu)",
-				((data->tcp_req.end - data->tcp_req.start) + 1));
-		fprintf(out, " ]\n");
-		break;
-	}
-	default:
-		fprintf(out, "Unknown user subtype %u\n", l->tlb_flex2);
-		break;
-	}
-}
-
-static void
-handle_user_type_unknown(const struct tcp_log_buffer *l)
-{
-
-	fprintf(out, "Unknown user type %u\n", l->tlb_flex1);
-}
-
 static uint64_t last_rxt_known = 0;
 static uint64_t last_snt_known = 0;
 static uint64_t pol_detection_txt = 0;
@@ -2914,23 +2871,6 @@ print_pace_size(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
 			bbr->flex5,
 			bbr->flex7,
 			bbr->flex6);
-	}
-}
-
-static void
-handle_user_event_log_entry(const struct tcp_log_buffer *l)
-{
-
-	assert(l->tlb_eventid == TCP_LOG_USER_EVENT);
-	/* tlb_flex1 has the type */
-	switch (l->tlb_flex1) {
-	case TCP_LOG_USER_HTTPD:
-		handle_user_type_httpd(l);
-		break;
-	default:
-		/* unknown type */
-		handle_user_type_unknown(l);
-		break;
 	}
 }
 
@@ -3566,11 +3506,6 @@ backwards:
 				l->tlb_snd_max,
 				(l->tlb_snd_max - l->tlb_snd_una),
 				l->tlb_flags);
-		}
-		break;
-	case TCP_LOG_USER_EVENT:
-		if (show_all_messages) {
-			handle_user_event_log_entry(l);
 		}
 		break;
 	case TCP_LOG_SENDFILE:
@@ -5247,7 +5182,6 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	if ((id == TCP_LOG_USERSEND) ||
 	    (id == TCP_LOG_FLOWEND) ||
 	    (id == TCP_LOG_CONNEND) ||
-	    (id == TCP_LOG_USER_EVENT) ||
 	    (id == TCP_LOG_PRU) ||
 	    (id == TCP_LOG_SENDFILE) ||
 	    (id == TCP_LOG_SOCKET_OPT)){
@@ -6502,9 +6436,6 @@ backward:
 			(l->tlb_snd_max - l->tlb_snd_una),
 			l->tlb_flags, bbr->inhpts);
 		break;
-	case TCP_LOG_USER_EVENT:
-		handle_user_event_log_entry(l);
-		break;
 	case TCP_LOG_SENDFILE:
 		handle_sendfile_log_entry(l);
 		break;
@@ -7566,9 +7497,6 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			l->tlb_snd_max,
 			(l->tlb_snd_max - l->tlb_snd_una),
 			l->tlb_flags);
-		break;
-	case TCP_LOG_USER_EVENT:
-		handle_user_event_log_entry(l);
 		break;
 	case TCP_LOG_SENDFILE:
 		handle_sendfile_log_entry(l);
