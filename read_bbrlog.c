@@ -223,7 +223,7 @@ static const char *log_names[MAX_TYPES] = {
 	"SOWAKE    ", /* We wokeup a socket buffer       4 */
 	"TCP_UNUSED_5", /* Detected bad retransmission   5 */
 	"PRR       ", /* Doing PRR                       6 */
-	"REORDER   ", /* Detected reorder                7 */
+	"TCP_UNUSED_7", /* Detected reorder              7 */
 	"PACER     ", /* Pacer sending a packet          8 */
 	"BBRUPD    ", /* We updated BBR info     9 */
 	"BBRSND    ", /* We did a slot calculation and sending is done 10 */
@@ -4054,7 +4054,6 @@ backwards:
 		}
 		break;
 	case TCP_LOG_PRR:
-	case TCP_LOG_REORDER:
 	case TCP_LOG_HPTS:
 		if (show_all_messages)
 			fprintf(out, "\n");
@@ -7246,7 +7245,6 @@ backward:
 	}
 	default:
 	case TCP_LOG_PRR:
-	case TCP_LOG_REORDER:
 	case TCP_LOG_HPTS:
 	case BBR_LOG_EXIT_GAIN:
 	case BBR_LOG_PERSIST:
@@ -7339,7 +7337,6 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	switch (id) {
 	default:
 	case TCP_LOG_PRR:
-	case TCP_LOG_REORDER:
 	case TCP_LOG_HPTS:
 	case BBR_LOG_EXIT_GAIN:
 	case BBR_LOG_PERSIST:
