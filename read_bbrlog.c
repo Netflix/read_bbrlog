@@ -273,7 +273,7 @@ static const char *log_names[MAX_TYPES] = {
 	"TCP_LOG_CONNEND", 	/* 54 */
 	"TCP_LRO_LOG",		/* 55 */
 	"SACK_FILTER_RESULT",	/* 56 */
-	"TCP_SAD_DETECTION",	/* 57 */
+	"TCP_UNUSED_57",	/* 57 */
 	"TCP_TIMELY_WORK",	/* 58 */
 	"TCP_UNUSED_59",	/* 59 */
 	"SENDFILE  ",		/* 60 */
@@ -953,44 +953,6 @@ print_epoch_loss(uint32_t pe, uint32_t lost, uint32_t del)
 	}
 	fprintf(out, "\n");
 	pkt_epoch_track(pe, lost, del);
-}
-
-static void
-dump_sad_values(const struct tcp_log_bbr *bbr)
-{
-	if (bbr->flex8 == 1) {
-		fprintf(out, "Detecting ");
-	} else if (bbr->flex8 == 2) {
-		fprintf(out, "An Attacker ");
-	} else if (bbr->flex8 == 3) {
-		fprintf(out, "False Positive ");
-	} else if (bbr->flex8 == 4) {
-		fprintf(out, "Suspicious SACK ");
-	} else if (bbr->flex8 == 5) {
-		fprintf(out, "SACK details e:%u s:%u [l:%u] rsm_e:%u rsm_s:%u [l:%u] fas:%u bas:%u jr:%u segsiz:%u rflags:0x%x\n",
-			bbr->flex1, bbr->flex2,
-			(bbr->flex1 - bbr->flex2),
-			bbr->flex3, bbr->flex4,
-			(bbr->flex3 - bbr->flex4),
-			bbr->flex6, bbr->flex7,
-			bbr->bbr_substate, bbr->flex5, bbr->pkts_out
-			);
-		return;
-	} else {
-		fprintf(out, "meth:%d? ", bbr->flex8);
-	}
-	fprintf(out, "Sacks:%u Acks:%u mv:%u nomv:%u mapa:%u sd:%d supicious:%u\n",
-		bbr->flex1, bbr->flex2,
-		bbr->flex3, bbr->flex4,
-		bbr->flex5, bbr->flex7, bbr->bbr_state);
-	print_out_space(out);
-	fprintf(out, "flight:%u s2ath:%u s2mth:%u fd:%d dd:%d map_lim:%u decay_th:%u\n",
-		bbr->inflight,
-		bbr->flex6,
-		bbr->pkts_out,
-		((bbr->lt_epoch >> 8) & 0xff),
-		(bbr->lt_epoch & 0xff),
-		bbr->applimited, bbr->delivered);
 }
 
 static void
@@ -3611,9 +3573,6 @@ backwards:
 	case TCP_SACK_FILTER_RES:
 		dump_sack_filter(bbr);
 		break;
-	case TCP_SAD_DETECT:
-		dump_sad_values(bbr);
-		break;
 	case BBR_LOG_DOSEG_DONE:
 		if (show_all_messages) {
 			char *bw_str;
@@ -6068,9 +6027,6 @@ backward:
 		break;
 	case TCP_SACK_FILTER_RES:
 		dump_sack_filter(bbr);
-		break;
-	case TCP_SAD_DETECT:
-		dump_sad_values(bbr);
 		break;
 	case BBR_LOG_DOSEG_DONE:
 		mask = get_timer_mask(bbr->flex4);
