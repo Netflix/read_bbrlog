@@ -221,14 +221,14 @@ static const char *log_names[MAX_TYPES] = {
 	"PKT_OUT   ", /* Transmit (without other event)  2 */
 	"RTO       ", /* Retransmit timeout              3 */
 	"SOWAKE    ", /* We wokeup a socket buffer       4 */
-	"BAD_RETRAN", /* Detected bad retransmission 5 */
+	"TCP_UNUSED_5", /* Detected bad retransmission   5 */
 	"PRR       ", /* Doing PRR                       6 */
-	"REORDER   ", /* Detected reorder                7 */
+	"TCP_UNUSED_7", /* Detected reorder              7 */
 	"PACER     ", /* Pacer sending a packet          8 */
 	"BBRUPD    ", /* We updated BBR info     9 */
 	"BBRSND    ", /* We did a slot calculation and sending is done 10 */
 	"ACKCLEAR  ", /* A ack clears all outstanding     11 */
-	"INQUEUE   ", /* The tcb had a packet input to it 12 */
+	"TCP_UNUSED_12", /* The tcb had a packet input to it 12 */
 	"TIMERSTAR ", /* Start a timer                    13 */
 	"TIMERCANC ", /* Cancel a timer                   14 */
 	"ENTREC    ", /* Entered recovery                 15 */
@@ -265,7 +265,7 @@ static const char *log_names[MAX_TYPES] = {
 	"BBR_STARTUP_LOG",     /* 46 */
 	"TCP_LOG_RTT",	       /* 47 */
 	"BBR_SETTINGS",		/* 48 */
-	"BBR_SRTT_GAIN_EVENT",	/* 49 */
+	"TCP_UNUSED_49",	/* 49 */
 	"TCP_LOG_REASS", 	/* 50 */
  	"TCP_PACE_SIZE",	/* 51 */
 	"BBR_TCP_HDWR_PACE",	/* 52 */
@@ -273,9 +273,9 @@ static const char *log_names[MAX_TYPES] = {
 	"TCP_LOG_CONNEND", 	/* 54 */
 	"TCP_LRO_LOG",		/* 55 */
 	"SACK_FILTER_RESULT",	/* 56 */
-	"TCP_SAD_DETECTION",	/* 57 */
+	"TCP_UNUSED_57",	/* 57 */
 	"TCP_TIMELY_WORK",	/* 58 */
-	"USER_LOG  ",		/* 59 */
+	"TCP_UNUSED_59",	/* 59 */
 	"SENDFILE  ",		/* 60 */
 	"TCP_LOG_REQ_T",	/* 61 */
 	"TCP_ACCOUNTING",	/* 62 */
@@ -953,44 +953,6 @@ print_epoch_loss(uint32_t pe, uint32_t lost, uint32_t del)
 	}
 	fprintf(out, "\n");
 	pkt_epoch_track(pe, lost, del);
-}
-
-static void
-dump_sad_values(const struct tcp_log_bbr *bbr)
-{
-	if (bbr->flex8 == 1) {
-		fprintf(out, "Detecting ");
-	} else if (bbr->flex8 == 2) {
-		fprintf(out, "An Attacker ");
-	} else if (bbr->flex8 == 3) {
-		fprintf(out, "False Positive ");
-	} else if (bbr->flex8 == 4) {
-		fprintf(out, "Suspicious SACK ");
-	} else if (bbr->flex8 == 5) {
-		fprintf(out, "SACK details e:%u s:%u [l:%u] rsm_e:%u rsm_s:%u [l:%u] fas:%u bas:%u jr:%u segsiz:%u rflags:0x%x\n",
-			bbr->flex1, bbr->flex2,
-			(bbr->flex1 - bbr->flex2),
-			bbr->flex3, bbr->flex4,
-			(bbr->flex3 - bbr->flex4),
-			bbr->flex6, bbr->flex7,
-			bbr->bbr_substate, bbr->flex5, bbr->pkts_out
-			);
-		return;
-	} else {
-		fprintf(out, "meth:%d? ", bbr->flex8);
-	}
-	fprintf(out, "Sacks:%u Acks:%u mv:%u nomv:%u mapa:%u sd:%d supicious:%u\n",
-		bbr->flex1, bbr->flex2,
-		bbr->flex3, bbr->flex4,
-		bbr->flex5, bbr->flex7, bbr->bbr_state);
-	print_out_space(out);
-	fprintf(out, "flight:%u s2ath:%u s2mth:%u fd:%d dd:%d map_lim:%u decay_th:%u\n",
-		bbr->inflight,
-		bbr->flex6,
-		bbr->pkts_out,
-		((bbr->lt_epoch >> 8) & 0xff),
-		(bbr->lt_epoch & 0xff),
-		bbr->applimited, bbr->delivered);
 }
 
 static void
@@ -2689,49 +2651,6 @@ handle_sendfile_log_entry(const struct tcp_log_buffer *l)
 		sf->offset, sf->length, sf->flags, start, end);
 }
 
-static void
-handle_user_type_httpd(const struct tcp_log_buffer *l)
-{
-	const union tcp_log_userdata *data;
-
-	data = (const union tcp_log_userdata *)&l->tlb_stackinfo.u_raw;
-	/* tlb_flex2 has the subtype */
-	switch (l->tlb_flex2) {
-	case TCP_LOG_HTTPD_TS:
-		fprintf(out, "ts: %"PRIu64 "\n", data->tcp_req.timestamp);
-		break;
-	case TCP_LOG_HTTPD_TS_REQ:
-	{
-		/* print timestamp */
-		fprintf(out, "tm: %"PRIu64, data->tcp_req.timestamp);
-		/* print range */
-		fprintf(out, " range: [ ");
-		if (data->tcp_req.flags & TCP_LOG_HTTPD_RANGE_START)
-			fprintf(out, "%"PRIu64, data->tcp_req.start);
-		fprintf(out, "-");
-		if (data->tcp_req.flags & TCP_LOG_HTTPD_RANGE_END)
-			fprintf(out, "%"PRIu64, data->tcp_req.end);
-		/* The range request is inclusive so we add 1 */
-		if ((data->tcp_req.flags & TCP_LOG_HTTPD_RANGE_END) &&
-		    (data->tcp_req.flags & TCP_LOG_HTTPD_RANGE_START))
-			fprintf(out, " (len:%lu)",
-				((data->tcp_req.end - data->tcp_req.start) + 1));
-		fprintf(out, " ]\n");
-		break;
-	}
-	default:
-		fprintf(out, "Unknown user subtype %u\n", l->tlb_flex2);
-		break;
-	}
-}
-
-static void
-handle_user_type_unknown(const struct tcp_log_buffer *l)
-{
-
-	fprintf(out, "Unknown user type %u\n", l->tlb_flex1);
-}
-
 static uint64_t last_rxt_known = 0;
 static uint64_t last_snt_known = 0;
 static uint64_t pol_detection_txt = 0;
@@ -2914,23 +2833,6 @@ print_pace_size(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
 			bbr->flex5,
 			bbr->flex7,
 			bbr->flex6);
-	}
-}
-
-static void
-handle_user_event_log_entry(const struct tcp_log_buffer *l)
-{
-
-	assert(l->tlb_eventid == TCP_LOG_USER_EVENT);
-	/* tlb_flex1 has the type */
-	switch (l->tlb_flex1) {
-	case TCP_LOG_USER_HTTPD:
-		handle_user_type_httpd(l);
-		break;
-	default:
-		/* unknown type */
-		handle_user_type_unknown(l);
-		break;
 	}
 }
 
@@ -3408,40 +3310,6 @@ backwards:
 			show_pacer_diag(bbr);
 		}
 		break;
-	case BBR_LOG_SRTT_GAIN_EVENT:
-	{
-		const char *method;
-		char bogons[100];
-		char *dr, *inuse;
-		if (bbr->flex8 == 0)
-			method = "Feature Disabled";
-		else if (bbr->flex8 == 1)
-			method = "Gaining";
-		else if (bbr->flex8 == 2)
-			method = "Continued Gain";
-		else if (bbr->flex8 == 3)
-			method = "Reducing";
-		else if (bbr->flex8 == 4)
-			method = "Neither";
-		else if (bbr->flex8 == 5)
-			method = "Release reduction";
-		else {
-			sprintf(bogons, "New Unknown %d", bbr->flex8);
-			method = bogons;
-		}
-		inuse = display_bw(bbr->bw_inuse, 1);
-		dr = display_bw(bbr->delRate, 1);
-		fprintf(out, " %s:%u delta:%u ndelta:%u s7-srtt:%u s2-srtt:%u icnt:%u gain_cnt:%u red:%u DR:%s AR:%s\n",
-			method, bbr->flex7,
-			bbr->flex1, bbr->flex2,
-			bbr->flex3, bbr->flex4,
-			bbr->flex5, bbr->flex6, bbr->pkts_out, dr, inuse);
-		if (inuse)
-			free(inuse);
-		if (dr)
-			free(dr);
-		break;
-	}
 	case BBR_LOG_BBRTSO:
 		if (show_all_messages) {
 			if ((bbr->flex8 & 0x80) == 0)
@@ -3566,11 +3434,6 @@ backwards:
 				l->tlb_snd_max,
 				(l->tlb_snd_max - l->tlb_snd_una),
 				l->tlb_flags);
-		}
-		break;
-	case TCP_LOG_USER_EVENT:
-		if (show_all_messages) {
-			handle_user_event_log_entry(l);
 		}
 		break;
 	case TCP_LOG_SENDFILE:
@@ -3709,9 +3572,6 @@ backwards:
 		break;
 	case TCP_SACK_FILTER_RES:
 		dump_sack_filter(bbr);
-		break;
-	case TCP_SAD_DETECT:
-		dump_sad_values(bbr);
 		break;
 	case BBR_LOG_DOSEG_DONE:
 		if (show_all_messages) {
@@ -4193,9 +4053,7 @@ backwards:
 			fprintf(dump_out_sack, "RXT\n");
 		}
 		break;
-	case TCP_LOG_BAD_RETRAN:
 	case TCP_LOG_PRR:
-	case TCP_LOG_REORDER:
 	case TCP_LOG_HPTS:
 		if (show_all_messages)
 			fprintf(out, "\n");
@@ -4633,26 +4491,6 @@ backwards:
 				bbr->flex5);
 		if (dump_out_sack) {
 			fprintf(dump_out_sack, "EXIT\n");
-		}
-		break;
-	case BBR_LOG_INQUEUE:
-		assert(bbr->bbr_state < 6);
-		if (show_all_messages) {
-			fprintf(out, "avail:%u cw:%u rw:%u (ip:%d ult:%d) pe:%u cpu:%d nseg:%d p_cpu:0x%x\n",
-				l->tlb_txbuf.tls_sb_acc,
-				l->tlb_snd_cwnd,
-				l->tlb_snd_wnd,
-				bbr->inhpts, bbr->use_lt_bw,
-				bbr->pkt_epoch,
-				bbr->flex2,
-				bbr->flex1,
-				bbr->flex3);
-			if (extra_print) {
-				print_out_space(out);
-				fprintf(out, "p_icpu:%x set:%x pr:%d\n",
-					bbr->flex4,
-					bbr->flex5, bbr->flex6);
-			}
 		}
 		break;
 	case BBR_LOG_TIMERSTAR:
@@ -5247,7 +5085,6 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	if ((id == TCP_LOG_USERSEND) ||
 	    (id == TCP_LOG_FLOWEND) ||
 	    (id == TCP_LOG_CONNEND) ||
-	    (id == TCP_LOG_USER_EVENT) ||
 	    (id == TCP_LOG_PRU) ||
 	    (id == TCP_LOG_SENDFILE) ||
 	    (id == TCP_LOG_SOCKET_OPT)){
@@ -6169,9 +6006,6 @@ backward:
 	case TCP_SACK_FILTER_RES:
 		dump_sack_filter(bbr);
 		break;
-	case TCP_SAD_DETECT:
-		dump_sad_values(bbr);
-		break;
 	case BBR_LOG_DOSEG_DONE:
 		mask = get_timer_mask(bbr->flex4);
 		{
@@ -6501,9 +6335,6 @@ backward:
 			l->tlb_snd_max,
 			(l->tlb_snd_max - l->tlb_snd_una),
 			l->tlb_flags, bbr->inhpts);
-		break;
-	case TCP_LOG_USER_EVENT:
-		handle_user_event_log_entry(l);
 		break;
 	case TCP_LOG_SENDFILE:
 		handle_sendfile_log_entry(l);
@@ -7393,15 +7224,12 @@ backward:
 		break;
 	}
 	default:
-	case TCP_LOG_BAD_RETRAN:
 	case TCP_LOG_PRR:
-	case TCP_LOG_REORDER:
 	case TCP_LOG_HPTS:
 	case BBR_LOG_EXIT_GAIN:
 	case BBR_LOG_PERSIST:
 	case BBR_LOG_PKT_EPOCH:
 	case BBR_LOG_ACKCLEAR:
-	case BBR_LOG_INQUEUE:
 	case BBR_LOG_ENTREC:
 	case BBR_LOG_EXITREC:
 	case BBR_LOG_BWSAMP:
@@ -7487,9 +7315,7 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	fprintf(out, "%u %u def [%u] %s ",  l->tlb_ticks, number_flow, timeoff, evt_name(id));
 	switch (id) {
 	default:
-	case TCP_LOG_BAD_RETRAN:
 	case TCP_LOG_PRR:
-	case TCP_LOG_REORDER:
 	case TCP_LOG_HPTS:
 	case BBR_LOG_EXIT_GAIN:
 	case BBR_LOG_PERSIST:
@@ -7497,7 +7323,6 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	case BBR_LOG_PKT_EPOCH:
 	case BBR_LOG_BBRUPD:
 	case BBR_LOG_ACKCLEAR:
-	case BBR_LOG_INQUEUE:
 	case BBR_LOG_TIMERCANC:
 	case BBR_LOG_ENTREC:
 	case BBR_LOG_EXITREC:
@@ -7566,9 +7391,6 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			l->tlb_snd_max,
 			(l->tlb_snd_max - l->tlb_snd_una),
 			l->tlb_flags);
-		break;
-	case TCP_LOG_USER_EVENT:
-		handle_user_event_log_entry(l);
 		break;
 	case TCP_LOG_SENDFILE:
 		handle_sendfile_log_entry(l);
