@@ -1230,8 +1230,6 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_USER_LOG");
 	} else if (opt == TCP_MAXUNACKTIME) {
 		return ("TCP_MAXUNACKTIME");
-	} else if (opt == TCP_MAXPEAKRATE) {
-		return ("TCP_MAXPEAKRATE");
 	} else if (opt == TCP_IDLE_REDUCE) {
 		return ("TCP_IDLE_REDUCE");
 	} else if (opt == TCP_REMOTE_UDP_ENCAPS_PORT) {
@@ -1260,24 +1258,16 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_KEEPCNT");
 	} else if (opt == TCP_FASTOPEN) {
 		return ("TCP_FASTOPEN");
-	} else if (opt == TCP_RACK_PROP) {
-		return ("TCP_RACK_PROP");
 	} else if (opt == TCP_RACK_TLP_REDUCE) {
 		return ("TCP_RACK_TLP_REDUCE");
-	} else if (opt == TCP_RACK_PACE_REDUCE) {
-		return ("TCP_RACK_PACE_REDUCE");
 	} else if (opt == TCP_RACK_PACE_MAX_SEG) {
 		return ("TCP_RACK_PACE_MAX_SEG");
 	} else if (opt == TCP_RACK_PACE_ALWAYS) {
 		return ("TCP_RACK_PACE_ALWAYS");
-	} else if (opt == TCP_RACK_PROP_RATE) {
-		return ("TCP_RACK_PROP_RATE");
 	} else if (opt == TCP_RACK_PRR_SENDALOT) {
 		return ("TCP_RACK_PRR_SENDALOT");
 	} else if (opt == TCP_RACK_MIN_TO) {
 		return ("TCP_RACK_MIN_TO");
-	} else if (opt == TCP_RACK_EARLY_RECOV) {
-		return ("TCP_RACK_EARLY_RECOV");
 	} else if (opt == TCP_RACK_EARLY_SEG) {
 		return ("TCP_RACK_EARLY_SEG");
 	} else if (opt == TCP_RACK_REORD_THRESH) {
@@ -1288,54 +1278,28 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_RACK_TLP_THRESH");
 	} else if (opt == TCP_RACK_PKT_DELAY) {
 		return ("TCP_RACK_PKT_DELAY");
-	} else if (opt == TCP_RACK_TLP_INC_VAR) {
-		return ("TCP_RACK_TLP_INC_VAR");
 	} else if (opt == TCP_BBR_IWINTSO) {
 		return ("TCP_BBR_IWINTSO");
-	} else if (opt == TCP_BBR_RECFORCE) {
-		return ("TCP_BBR_RECFORCE");
 	} else if (opt == TCP_BBR_STARTUP_PG) {
 		return ("TCP_BBR_STARTUP_PG");
 	} else if (opt == TCP_BBR_DRAIN_PG) {
 		return ("TCP_BBR_DRAIN_PG");
-	} else if (opt == TCP_BBR_RWND_IS_APP) {
-		return ("TCP_BBR_RWND_IS_APP");
 	} else if (opt == TCP_BBR_PROBE_RTT_INT) {
 		return ("TCP_BBR_PROBE_RTT_INT");
-	} else if (opt == TCP_BBR_ONE_RETRAN) {
-		return ("TCP_BBR_ONE_RETRAN");
 	} else if (opt == TCP_BBR_STARTUP_LOSS_EXIT) {
 		return ("TCP_BBR_STARTUP_LOSS_EXIT");
-	} else if (opt == TCP_BBR_USE_LOWGAIN) {
-		return ("TCP_BBR_USE_LOWGAIN");
-	} else if (opt == TCP_BBR_LOWGAIN_THRESH) {
-		return ("TCP_BBR_LOWGAIN_THRESH");
 	} else if (opt == TCP_BBR_TSLIMITS) {
 		return ("TCP_BBR_TSLIMITS");
-	} else if (opt == TCP_BBR_LOWGAIN_HALF) {
-		return ("TCP_BBR_LOWGAIN_HALF");
 	} else if (opt == TCP_BBR_PACE_OH) {
 		return ("TCP_BBR_PACE_OH");
-	} else if (opt == TCP_BBR_LOWGAIN_FD) {
-		return ("TCP_BBR_LOWGAIN_FD");
-	} else if (opt == TCP_BBR_HOLD_TARGET) {
-		return ("TCP_BBR_HOLD_TARGET");
 	} else if (opt == TCP_BBR_USEDEL_RATE) {
 		return ("TCP_BBR_USEDEL_RATE");
 	} else if (opt == TCP_BBR_MIN_RTO) {
 		return ("TCP_BBR_MIN_RTO");
 	} else if (opt == TCP_BBR_MAX_RTO) {
 		return ("TCP_BBR_MAX_RTO");
-	} else if (opt == TCP_BBR_REC_OVER_HPTS) {
-		return ("TCP_BBR_REC_OVER_HPTS");
-	} else if (opt == TCP_BBR_UNLIMITED) {
-		return ("TCP_BBR_UNLIMITED");
 	} else if (opt == TCP_BBR_ALGORITHM) {
 		return ("TCP_BBR_ALGORITHM");
-	} else if (opt == TCP_BBR_DRAIN_INC_EXTRA) {
-		return ("TCP_BBR_DRAIN_INC_EXTRA");
-	} else if (opt == TCP_BBR_STARTUP_EXIT_EPOCH) {
-		return ("TCP_BBR_STARTUP_EXIT_EPOCH");
 	} else if (opt == TCP_BBR_PACE_PER_SEC) {
 		return ("TCP_BBR_PACE_PER_SEC");
 	} else if (opt == TCP_BBR_PACE_DEL_TAR) {
@@ -1346,22 +1310,12 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_BBR_PACE_SEG_MIN");
 	} else if (opt == TCP_BBR_PACE_CROSS) {
 		return ("TCP_BBR_PACE_CROSS");
-	} else if (opt == TCP_RACK_IDLE_REDUCE_HIGH) {
-		return ("TCP_RACK_IDLE_REDUCE_HIGH");
-	} else if (opt == TCP_RACK_MIN_PACE) {
-		return ("TCP_RACK_MIN_PACE");
-	} else if (opt == TCP_RACK_MIN_PACE_SEG) {
-		return ("TCP_RACK_MIN_PACE_SEG");
 	} else if (opt == TCP_RACK_GP_INCREASE) {
 		return ("TCP_RACK_GP_INCREASE");
 	} else if (opt == TCP_RACK_TLP_USE) {
 		return ("TCP_RACK_TLP_USE");
-	} else if (opt == TCP_BBR_ACK_COMP_ALG) {
-		return ("TCP_BBR_ACK_COMP_ALG");
 	} else if (opt == TCP_BBR_TMR_PACE_OH) {
 		return ("TCP_BBR_TMR_PACE_OH");
-	} else if (opt == TCP_BBR_EXTRA_GAIN) {
-		return ("TCP_BBR_EXTRA_GAIN");
 	} else if (opt == TCP_RACK_DO_DETECTION) {
 		return ("TCP_RACK_DO_DETECTION");
 	} else if (opt == TCP_BBR_RACK_RTT_USE) {
@@ -1396,8 +1350,6 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_BBR_RACK_INIT_RATE");
 	} else if (opt == TCP_RACK_RR_CONF) {
 		return ("TCP_RACK_RR_CONF");
-	} else if (opt == TCP_RACK_GP_INCREASE_CA) {
-		return ("TCP_RACK_GP_INCREASE_CA");
 	} else if (opt == TCP_RACK_GP_INCREASE_SS) {
 		return ("TCP_RACK_GP_INCREASE_SS");
 	} else if (opt == TCP_RACK_GP_INCREASE_REC) {
@@ -1440,8 +1392,6 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_MEASURE_CNT");
 	} else if (opt == TCP_DEFER_OPTIONS) {
 		return ("TCP_DEFER_OPTIONS");
-	} else if (opt == TCP_FAST_RSM_HACK) {
-		return ("TCP_FAST_RSM_HACK");
 	} else if (opt == TCP_RACK_PACING_BETA) {
 		return ("TCP_RACK_PACING_BETA");
 	} else if (opt == TCP_RACK_PACING_BETA_ECN) {
