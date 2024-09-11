@@ -1310,8 +1310,6 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_BBR_PACE_SEG_MIN");
 	} else if (opt == TCP_BBR_PACE_CROSS) {
 		return ("TCP_BBR_PACE_CROSS");
-	} else if (opt == TCP_RACK_GP_INCREASE) {
-		return ("TCP_RACK_GP_INCREASE");
 	} else if (opt == TCP_RACK_TLP_USE) {
 		return ("TCP_RACK_TLP_USE");
 	} else if (opt == TCP_BBR_TMR_PACE_OH) {
@@ -1350,6 +1348,8 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_BBR_RACK_INIT_RATE");
 	} else if (opt == TCP_RACK_RR_CONF) {
 		return ("TCP_RACK_RR_CONF");
+	} else if (opt == TCP_RACK_GP_INCREASE_CA) {
+		return ("TCP_RACK_GP_INCREASE_CA");
 	} else if (opt == TCP_RACK_GP_INCREASE_SS) {
 		return ("TCP_RACK_GP_INCREASE_SS");
 	} else if (opt == TCP_RACK_GP_INCREASE_REC) {
