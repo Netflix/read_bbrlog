@@ -1216,8 +1216,6 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_TXTLS_ENABLE");
 	} else if (opt == TCP_TXTLS_MODE) {
 		return ("TCP_TXTLS_MODE");
-	} else if (opt == TCP_MAXBURST) {
-		return ("TCP_MAXBURST");
 	} else if (opt == TCP_IWND_NB) {
 		return ("TCP_IWND_NB");
 	} else if (opt == TCP_IWND_NSEG) {
