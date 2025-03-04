@@ -71,6 +71,8 @@ static uint8_t num_start_set = 0;
 static uint8_t num_end_set = 0;
 static uint8_t tag_dumped = 0;
 static char log_tag[TCP_LOG_TAG_LEN];
+static uint8_t reason_dumped = 0;
+static char log_reason[TCP_LOG_REASON_LEN];
 static uint32_t time_in_hot = 0;
 
 static int print_out_the_time = 0;
@@ -1417,8 +1419,6 @@ translate_tcp_sock_option(uint32_t opt)
 	} else if (opt == TCP_PACING_DND) {
 		return ("TCP_PACING_DND");
 #ifdef NETFLIX_TCP_STACK
-	} else if (opt == TCP_POLICER_DETECT) {
-		return ("TCP_POLICER_DETECT");
 	} else if (opt == TCP_SS_EEXIT) {
 		return ("TCP_SS_EEXIT");
 	} else if (opt == TCP_NO_TIMELY) {
@@ -1429,8 +1429,6 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_REC_IS_DYN");
 	} else if (opt == TCP_FILLCW_RATE_CAP) {
 		return ("TCP_FILLCW_RATE_CAP");
-	} else if (opt == TCP_POLICER_MSS) {
-		return ("TCP_POLICER_MSS");
 #endif
 	} else {
 		static char buf[128];
@@ -1464,11 +1462,10 @@ display_tp_trigger(const struct tcp_log_buffer *l)
 	const struct tcp_log_bbr *bbr;
 
 	bbr = &l->tlb_stackinfo.u_bbr;
-	fprintf(out, " Line:%d TP Number:%u left:%u mapa:%u sd:%d\n",
+	fprintf(out, " Line:%d TP Number:%u count left:%u\n",
 		bbr->flex1,
-		bbr->flex2,
 		bbr->flex3,
-		bbr->flex4, bbr->flex8);
+		bbr->flex2);
 }
 
 static void
@@ -1543,7 +1540,7 @@ tcp_display_http_log(const struct tcp_log_buffer *l, const struct tcp_log_bbr * 
 		}
 
 	}
-	fprintf(out, " %s COcR:0x%x tm:%lu flg:%s(0x%x) [ %lu - ",
+	fprintf(out, " %s COcR:0x%x tm:%lu flg:%s(0x%x) [ %lu -",
 		reas,
 		bbr->applimited,
 		bbr->rttProp,
@@ -1551,14 +1548,14 @@ tcp_display_http_log(const struct tcp_log_buffer *l, const struct tcp_log_bbr * 
 		bbr->flex3,
 		bbr->delRate);
 	if (bbr->flex3 & TCP_TRK_TRACK_FLG_OPEN)  {
-		fprintf(out, " ] slot:%d\n",
-			bbr->flex7);
+		fprintf(out, " ] play_ms:%u slot:%d\n",
+			bbr->lost, bbr->flex7);
 	} else {
-		fprintf(out, " %lu (%lu) ] slot:%d\n",
+		fprintf(out, " %lu (%lu) ] play_ms:%u slot:%d\n",
 			bbr->cur_del_rate,
 			((bbr->cur_del_rate > bbr->delRate) ?
-			 (bbr->cur_del_rate - bbr->delRate) : 0),
-			bbr->flex7);
+			 (bbr->cur_del_rate - bbr->delRate + 1) : 0),
+			bbr->lost, bbr->flex7);
 	}
 	if (extra_print) {
 		uint64_t nbytes, ltime;
@@ -2842,6 +2839,10 @@ dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		if (tag_dumped == 0) {
 			tag_dumped = 1;
 			strcpy(log_tag, lh->tlh_tag);
+		}
+		if (reason_dumped == 0) {
+			reason_dumped = 1;
+			(void)strlcpy(log_reason, lh->tlh_reason, sizeof(log_reason));
 		}
 		wct.tv_sec = lh->tlh_offset.tv_sec + l->tlb_tv.tv_sec;
 		wct.tv_usec = lh->tlh_offset.tv_usec + l->tlb_tv.tv_usec;
@@ -5119,6 +5120,10 @@ backward:
 			tag_dumped = 1;
 			strcpy(log_tag, lh->tlh_tag);
 		}
+		if (reason_dumped == 0) {
+			reason_dumped = 1;
+			(void)strlcpy(log_reason, lh->tlh_reason, sizeof(log_reason));
+		}
 		wct.tv_sec = lh->tlh_offset.tv_sec + l->tlb_tv.tv_sec;
 		wct.tv_usec = lh->tlh_offset.tv_usec + l->tlb_tv.tv_usec;
 		while (wct.tv_usec > 1000000) {
@@ -5717,8 +5722,8 @@ backward:
 				display_bw(bbr->bw_inuse, 0),
 				bbr->bw_inuse);
 		} else if (bbr->flex8 == 14) {
-			fprintf(out, "fill-cw in non-paced mode slot:%u bw:%s(%lu) ALEAGMIR:0x%x\n",
-				bbr->flex1,
+			fprintf(out, "fill-cw in non-paced mode slot:%u len:%u bw:%s(%lu) ALEAGMIR:0x%x\n",
+				bbr->flex1, bbr->flex2,
 				display_bw(bbr->bw_inuse, 0),
 				bbr->bw_inuse,
 				bbr->use_lt_bw);
@@ -6257,14 +6262,15 @@ backward:
 
 		last_cwnd_to_use = bbr->lt_epoch;
 		reascode = get_jr_reason(bbr->flex4);
-		fprintf(out, "slot:%u (ip:%d pc:%d) in_persist:%d avail:%u scw:%u rw:%u out:%u state:%u sndcnt:%d cw:%u reas:%s\n",
+		fprintf(out, "slot:%u (ip:%d pc:%d) in_persist:%d avail:%u cw:%u scw:%u rw:%u out:%u state:%u sndcnt:%d reas:%s\n",
 			bbr->flex1, bbr->inhpts,
 			bbr->flex7, bbr->flex8,
 			l->tlb_txbuf.tls_sb_acc,
+			l->tlb_snd_cwnd,
 			bbr->lt_epoch,
 			l->tlb_snd_wnd,
 			(l->tlb_snd_max - l->tlb_snd_una),
-			l->tlb_state, bbr->flex5, l->tlb_snd_cwnd, reascode);
+			l->tlb_state, bbr->flex5, reascode);
 		if (extra_print) {
 			print_out_space(out);
 			mask = get_timer_mask(bbr->flex2);
@@ -7217,6 +7223,10 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		if (tag_dumped == 0) {
 			tag_dumped = 1;
 			strcpy(log_tag, lh->tlh_tag);
+		}
+		if (reason_dumped == 0) {
+			reason_dumped = 1;
+			(void)strlcpy(log_reason, lh->tlh_reason, sizeof(log_reason));
 		}
 		wct.tv_sec = lh->tlh_offset.tv_sec + l->tlb_tv.tv_sec;
 		wct.tv_usec = lh->tlh_offset.tv_usec + l->tlb_tv.tv_usec;
@@ -8182,6 +8192,9 @@ main(int argc, char **argv)
 	}
 	if (tag_dumped) {
 		fprintf(out, "Tag:%s\n", log_tag);
+	}
+	if (reason_dumped) {
+		fprintf(out, "Reason:%s\n", log_reason);
 	}
 	if (early_filled) {
 		struct tm *tmval;
