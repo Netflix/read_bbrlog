@@ -2194,7 +2194,7 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 	    (bbr->flex8 != HYBRID_LOG_CAP_CALC)) {
 		uint64_t cur_time, since_prev_set = 0;
 
-		cur_time = tcp_tv_to_lusectick(&l->tlb_tv);
+		cur_time = tcp_tv_to_lusec(&l->tlb_tv);
 		if (bbr->flex8 == HYBRID_LOG_RULES_SET) {
 			if (prev_set_init) {
 				since_prev_set = cur_time - prev_set_seen;
@@ -6686,7 +6686,7 @@ backward:
 				if (prev_sent_time && prev_sent_bytes && (l->tlb_len > 0)) {
 					uint64_t bw, now, t, oh;
 
-					now = tcp_tv_to_lusectick(&l->tlb_tv);
+					now = tcp_tv_to_lusec(&l->tlb_tv);
 					bw = prev_sent_bytes;
 					oh = bw / (uint64_t)bbr->flex2;
 					if (oh == 0)
@@ -6722,7 +6722,7 @@ backward:
 				}
 				if (l->tlb_len) {
 					prev_sent_bytes = l->tlb_len;
-					prev_sent_time = tcp_tv_to_lusectick(&l->tlb_tv);
+					prev_sent_time = tcp_tv_to_lusec(&l->tlb_tv);
 					prev_sn = l->tlb_sn;
 				}
 			} else {
