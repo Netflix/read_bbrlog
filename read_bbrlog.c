@@ -71,6 +71,8 @@ static uint8_t num_start_set = 0;
 static uint8_t num_end_set = 0;
 static uint8_t tag_dumped = 0;
 static char log_tag[TCP_LOG_TAG_LEN];
+static uint8_t reason_dumped = 0;
+static char log_reason[TCP_LOG_REASON_LEN];
 static uint32_t time_in_hot = 0;
 
 static int print_out_the_time = 0;
@@ -401,7 +403,7 @@ show_diff(uint32_t old, uint32_t new)
 {
 	static char print_buffer[100];
 	uint32_t delta;
-	
+
 	if (old > new) {
 		delta = old - new;
 		sprintf(print_buffer, "(-%u)",
@@ -1417,8 +1419,6 @@ translate_tcp_sock_option(uint32_t opt)
 	} else if (opt == TCP_PACING_DND) {
 		return ("TCP_PACING_DND");
 #ifdef NETFLIX_TCP_STACK
-	} else if (opt == TCP_POLICER_DETECT) {
-		return ("TCP_POLICER_DETECT");
 	} else if (opt == TCP_SS_EEXIT) {
 		return ("TCP_SS_EEXIT");
 	} else if (opt == TCP_NO_TIMELY) {
@@ -1429,8 +1429,6 @@ translate_tcp_sock_option(uint32_t opt)
 		return ("TCP_REC_IS_DYN");
 	} else if (opt == TCP_FILLCW_RATE_CAP) {
 		return ("TCP_FILLCW_RATE_CAP");
-	} else if (opt == TCP_POLICER_MSS) {
-		return ("TCP_POLICER_MSS");
 #endif
 	} else {
 		static char buf[128];
@@ -1464,11 +1462,10 @@ display_tp_trigger(const struct tcp_log_buffer *l)
 	const struct tcp_log_bbr *bbr;
 
 	bbr = &l->tlb_stackinfo.u_bbr;
-	fprintf(out, " Line:%d TP Number:%u left:%u mapa:%u sd:%d\n",
+	fprintf(out, " Line:%d TP Number:%u count left:%u\n",
 		bbr->flex1,
-		bbr->flex2,
 		bbr->flex3,
-		bbr->flex4, bbr->flex8);
+		bbr->flex2);
 }
 
 static void
@@ -1543,7 +1540,7 @@ tcp_display_http_log(const struct tcp_log_buffer *l, const struct tcp_log_bbr * 
 		}
 
 	}
-	fprintf(out, " %s COcR:0x%x tm:%lu flg:%s(0x%x) [ %lu - ",
+	fprintf(out, " %s COcR:0x%x tm:%lu flg:%s(0x%x) [ %lu -",
 		reas,
 		bbr->applimited,
 		bbr->rttProp,
@@ -1551,14 +1548,14 @@ tcp_display_http_log(const struct tcp_log_buffer *l, const struct tcp_log_bbr * 
 		bbr->flex3,
 		bbr->delRate);
 	if (bbr->flex3 & TCP_TRK_TRACK_FLG_OPEN)  {
-		fprintf(out, " ] slot:%d\n",
-			bbr->flex7);
+		fprintf(out, " ] play_ms:%u slot:%d\n",
+			bbr->lost, bbr->flex7);
 	} else {
-		fprintf(out, " %lu (%lu) ] slot:%d\n",
+		fprintf(out, " %lu (%lu) ] play_ms:%u slot:%d\n",
 			bbr->cur_del_rate,
 			((bbr->cur_del_rate > bbr->delRate) ?
-			 (bbr->cur_del_rate - bbr->delRate) : 0),
-			bbr->flex7);
+			 (bbr->cur_del_rate - bbr->delRate + 1) : 0),
+			bbr->lost, bbr->flex7);
 	}
 	if (extra_print) {
 		uint64_t nbytes, ltime;
@@ -2180,7 +2177,7 @@ get_hybrid_pacing_flags(uint8_t flg)
 	len = strlen(flags_ret);
 	if (len == 0) {
 		/* No hybrid  flags*/
-		sprintf(flags_ret, "NOT PACED|HYBRID OFF"); 
+		sprintf(flags_ret, "NOT PACED|HYBRID OFF");
 	} else {
 		/* Take out the trailing | */
 		flags_ret[(len - 1)] = 0;
@@ -2197,7 +2194,7 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 	    (bbr->flex8 != HYBRID_LOG_CAP_CALC)) {
 		uint64_t cur_time, since_prev_set = 0;
 
-		cur_time = tcp_tv_to_lusectick(&l->tlb_tv);
+		cur_time = tcp_tv_to_lusec(&l->tlb_tv);
 		if (bbr->flex8 == HYBRID_LOG_RULES_SET) {
 			if (prev_set_init) {
 				since_prev_set = cur_time - prev_set_seen;
@@ -2345,7 +2342,6 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 			data,
 			bbr->rttProp,
 			bbr->bbr_substate);
-			
 		fprintf(out, " i_cbw:%s (%lu)\n",
 			display_bw(i_cbw, 0), i_cbw);
 		print_out_space(out);
@@ -2392,7 +2388,7 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 		   (bbr->flex8 == HYBRID_LOG_CAP_CALC)) {
 		uint64_t rate_cap, lt_bw, now, deadline;
 		const char *res;
-		
+
 		deadline = bbr->cur_del_rate;
 		now = l->tlb_tv.tv_sec * 1000000;
 		now += l->tlb_tv.tv_usec;
@@ -2416,7 +2412,7 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 		}
 		fprintf(out, "Reason:%s ts:%u capped rate wanted:%s (%lu) from %s -- ",
 			hybrid_mode(bbr->flex8),
-			bbr->timeStamp, 
+			bbr->timeStamp,
 			display_bw(bbr->bw_inuse, 0), bbr->bw_inuse,
 			res);
 		fprintf(out, "gp_est:%s (%lu)\n",
@@ -2435,10 +2431,9 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 				deadline, now, del, bbr->pkts_out, bbr->flex6, l->tlb_snd_una,
 				(bbr->pkts_out - l->tlb_snd_una), bbr->bbr_substate);
 		}
-	
 	} else {
 		fprintf(out, "Don't know how to render %s [%d]\n",
-			hybrid_mode(bbr->flex8), bbr->flex8);	
+			hybrid_mode(bbr->flex8), bbr->flex8);
 	}
 }
 
@@ -2613,7 +2608,7 @@ show_hystart(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
 	 * 1 - rtt_thresh in flex1, checking to see if RTT is to great.
 	 * 2 - rtt is too great, rtt_thresh in flex1.
 	 * 3 - CSS is active incr in flex1
-	 * 4 - A new round is beginning flex1 is round count 
+	 * 4 - A new round is beginning flex1 is round count
 	 * 5 - A new RTT measurement flex1 is the new measurement.
 	 * 6 - We enter CA ssthresh is also in flex1.
 	 * 7 - Socket option to change hystart executed opt.val in flex1.
@@ -2659,7 +2654,7 @@ show_hystart(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
 			l->tlb_iss);
 	} else if (bbr->flex8 == 21) {
 		double top, bot, per_oa, per_rnd, per_pd;
-		
+
 		top = bbr->delRate * 100.0;
 		bot = bbr->cur_del_rate * 1.0;
 		if (bot > 0.0) {
@@ -2843,6 +2838,10 @@ dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			tag_dumped = 1;
 			strcpy(log_tag, lh->tlh_tag);
 		}
+		if (reason_dumped == 0) {
+			reason_dumped = 1;
+			(void)strlcpy(log_reason, lh->tlh_reason, sizeof(log_reason));
+		}
 		wct.tv_sec = lh->tlh_offset.tv_sec + l->tlb_tv.tv_sec;
 		wct.tv_usec = lh->tlh_offset.tv_usec + l->tlb_tv.tv_usec;
 		while (wct.tv_usec > 1000000) {
@@ -2989,7 +2988,7 @@ dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			delivered_at_thresh = bbr->delivered;
 		}
 	}
-	
+
 	if (tlb_sn_set >  0) {
 		if ((tlb_sn+1) != l->tlb_sn) {
 			if (tlb_sn > l->tlb_sn) {
@@ -5119,6 +5118,10 @@ backward:
 			tag_dumped = 1;
 			strcpy(log_tag, lh->tlh_tag);
 		}
+		if (reason_dumped == 0) {
+			reason_dumped = 1;
+			(void)strlcpy(log_reason, lh->tlh_reason, sizeof(log_reason));
+		}
 		wct.tv_sec = lh->tlh_offset.tv_sec + l->tlb_tv.tv_sec;
 		wct.tv_usec = lh->tlh_offset.tv_usec + l->tlb_tv.tv_usec;
 		while (wct.tv_usec > 1000000) {
@@ -5185,7 +5188,7 @@ backward:
 			if (add_colon)
 				fprintf(out, "%u: %u rack [%u] %s ",
 					time_display, number_flow, timeoff, evt_name(id));
-			else 
+			else
 				fprintf(out, "%u %u rack [%u] %s ",
 					time_display, number_flow, timeoff, evt_name(id));
 
@@ -5250,7 +5253,7 @@ backward:
 			stored_gp <<= 32;
 			stored_gp |= bbr->pkts_out;
 			fprintf(out, "Clamps applied:%u Max:%u gp_bw:%s (%lu) min_to:%u\n",
-				bbr->delivered, bbr->applimited, 
+				bbr->delivered, bbr->applimited,
 				display_bw(stored_gp, 0), stored_gp, bbr->epoch);
 		} else if (bbr->flex8 == 6) {
 			uint64_t bw;
@@ -5352,7 +5355,7 @@ backward:
 			}
 		} else if (bbr->flex8 == 42) {
 			fprintf(out, "It Incremented Rnd:%u inc by:%u thresh:%u\n",
-				bbr->flex1, bbr->flex2, 
+				bbr->flex1, bbr->flex2,
 				bbr->flex3);
 
 		} else if (bbr->flex8 == 44) {
@@ -5368,7 +5371,6 @@ backward:
 				bbr->flex3, bbr->flex4,
 				bbr->cur_del_rate,
 				bbr->rttProp, bbr->delRate);
-				
 		} else {
 			fprintf(out, " Unknown Cwnd log flex8:%u\n", bbr->flex8);
 		}
@@ -5553,7 +5555,6 @@ backward:
 					delta_per = top / bot;
 					sprintf(dump_buf, "-%3.5f", delta_per);
 				}
-				
 			}
 			prev_gp_est = bbr->rttProp;
 			gbw = display_bw(bbr->rttProp, 1);
@@ -5717,8 +5718,8 @@ backward:
 				display_bw(bbr->bw_inuse, 0),
 				bbr->bw_inuse);
 		} else if (bbr->flex8 == 14) {
-			fprintf(out, "fill-cw in non-paced mode slot:%u bw:%s(%lu) ALEAGMIR:0x%x\n",
-				bbr->flex1,
+			fprintf(out, "fill-cw in non-paced mode slot:%u len:%u bw:%s(%lu) ALEAGMIR:0x%x\n",
+				bbr->flex1, bbr->flex2,
 				display_bw(bbr->bw_inuse, 0),
 				bbr->bw_inuse,
 				bbr->use_lt_bw);
@@ -5775,7 +5776,6 @@ backward:
 			fprintf(out, "ALEAGMIR:0x%x delayed:%u early:%u\n",
 				bbr->use_lt_bw,
 				bbr->epoch, bbr->lt_epoch);
-				
 		} else if (bbr->flex8 == 27) {
 			fprintf(out, "Timer setup slot originally:%u we use %u ALEAGMIR:0x%x delayed:%u earlly:%u\n",
 				bbr->flex2, bbr->flex1,
@@ -5784,7 +5784,7 @@ backward:
 		} else if (bbr->flex8 == 30) {
 			const char *dgp_on, *less_agg, *fillcw, *dis;
 			int discount;
-			
+
 			if (bbr->bbr_state & 0x10) {
 				dgp_on = "DGP active";
 			} else {
@@ -5813,8 +5813,8 @@ backward:
 				dgp_on, fillcw, less_agg, dis, discount, bbr->flex2, l->tlb_snd_cwnd);
 		} else if (bbr->flex8 == 69) {
 			const char *strnm;
-			
-			if (bbr->flex7 == 1) 
+
+			if (bbr->flex7 == 1)
 				strnm = "Setup";
 			else if (bbr->flex7 == 2)
 				strnm = "Change";
@@ -5869,7 +5869,7 @@ backward:
 					bbr->rttProp);
 			} else {
 				uint32_t snd_max, snd_una, seq_start, seq_end;
-				
+
 				if (use_relative_seq) {
 					snd_max = l->tlb_snd_max - l->tlb_iss;
 					snd_una = l->tlb_snd_una - l->tlb_iss;
@@ -5891,7 +5891,7 @@ backward:
 			print_out_space(out);
 			fprintf(out, "                  ack_ts_start:%u ack_ts_end:%u aplnset:%u\n",
 				bbr->flex4, bbr->flex3, bbr->cwnd_gain);
-			print_out_space(out);			
+			print_out_space(out);
 			fprintf(out, "                  snd_ts_start:%u snd_ts_end:%u apl_cnt:%u seqs:%u seqe:%u flags:0x%x\n",
 				(uint32_t)bbr->delRate, (uint32_t)bbr->rttProp, bbr->pkt_epoch,
 				bbr->applimited, bbr->delivered, bbr->epoch);
@@ -5902,7 +5902,7 @@ backward:
 				bbr->bw_inuse, bbr->rttProp, bbr->bbr_substate);
 		} else if (bbr->flex8 == 89) {
 			uint32_t buck_max, cur_buck;
-			
+
 			buck_max = (bbr->delRate & 0x00000000ffffffff);
 			cur_buck = ((bbr->delRate >> 32) & 0x00000000ffffffff);
 			fprintf(out, "Policed pacing at bw:%s (%lu) bucket_max:%u current_bucket:%u len:%u delay:%u\n",
@@ -6257,14 +6257,15 @@ backward:
 
 		last_cwnd_to_use = bbr->lt_epoch;
 		reascode = get_jr_reason(bbr->flex4);
-		fprintf(out, "slot:%u (ip:%d pc:%d) in_persist:%d avail:%u scw:%u rw:%u out:%u state:%u sndcnt:%d cw:%u reas:%s\n",
+		fprintf(out, "slot:%u (ip:%d pc:%d) in_persist:%d avail:%u cw:%u scw:%u rw:%u out:%u state:%u sndcnt:%d reas:%s\n",
 			bbr->flex1, bbr->inhpts,
 			bbr->flex7, bbr->flex8,
 			l->tlb_txbuf.tls_sb_acc,
+			l->tlb_snd_cwnd,
 			bbr->lt_epoch,
 			l->tlb_snd_wnd,
 			(l->tlb_snd_max - l->tlb_snd_una),
-			l->tlb_state, bbr->flex5, l->tlb_snd_cwnd, reascode);
+			l->tlb_state, bbr->flex5, reascode);
 		if (extra_print) {
 			print_out_space(out);
 			mask = get_timer_mask(bbr->flex2);
@@ -6684,8 +6685,8 @@ backward:
 			if (clear_to_print) {
 				if (prev_sent_time && prev_sent_bytes && (l->tlb_len > 0)) {
 					uint64_t bw, now, t, oh;
-					
-					now = tcp_tv_to_lusectick(&l->tlb_tv);
+
+					now = tcp_tv_to_lusec(&l->tlb_tv);
 					bw = prev_sent_bytes;
 					oh = bw / (uint64_t)bbr->flex2;
 					if (oh == 0)
@@ -6713,7 +6714,7 @@ backward:
 					clear_to_print = 0;
 				} else {
 					print_out_space(out);
-					if (l->tlb_len > 0) 
+					if (l->tlb_len > 0)
 						fprintf(out, "Paced at -- No B/W (idle) yet sn:%u sending:%u\n", l->tlb_sn, l->tlb_len);
 					else
 						fprintf(out, "Paced at -- No B/W sending:%u bytes\n", l->tlb_len);
@@ -6721,7 +6722,7 @@ backward:
 				}
 				if (l->tlb_len) {
 					prev_sent_bytes = l->tlb_len;
-					prev_sent_time = tcp_tv_to_lusectick(&l->tlb_tv);
+					prev_sent_time = tcp_tv_to_lusec(&l->tlb_tv);
 					prev_sn = l->tlb_sn;
 				}
 			} else {
@@ -7217,6 +7218,10 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		if (tag_dumped == 0) {
 			tag_dumped = 1;
 			strcpy(log_tag, lh->tlh_tag);
+		}
+		if (reason_dumped == 0) {
+			reason_dumped = 1;
+			(void)strlcpy(log_reason, lh->tlh_reason, sizeof(log_reason));
 		}
 		wct.tv_sec = lh->tlh_offset.tv_sec + l->tlb_tv.tv_sec;
 		wct.tv_usec = lh->tlh_offset.tv_usec + l->tlb_tv.tv_usec;
@@ -8182,6 +8187,9 @@ main(int argc, char **argv)
 	}
 	if (tag_dumped) {
 		fprintf(out, "Tag:%s\n", log_tag);
+	}
+	if (reason_dumped) {
+		fprintf(out, "Reason:%s\n", log_reason);
 	}
 	if (early_filled) {
 		struct tm *tmval;
