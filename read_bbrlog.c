@@ -403,7 +403,7 @@ show_diff(uint32_t old, uint32_t new)
 {
 	static char print_buffer[100];
 	uint32_t delta;
-	
+
 	if (old > new) {
 		delta = old - new;
 		sprintf(print_buffer, "(-%u)",
@@ -2177,7 +2177,7 @@ get_hybrid_pacing_flags(uint8_t flg)
 	len = strlen(flags_ret);
 	if (len == 0) {
 		/* No hybrid  flags*/
-		sprintf(flags_ret, "NOT PACED|HYBRID OFF"); 
+		sprintf(flags_ret, "NOT PACED|HYBRID OFF");
 	} else {
 		/* Take out the trailing | */
 		flags_ret[(len - 1)] = 0;
@@ -2342,7 +2342,6 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 			data,
 			bbr->rttProp,
 			bbr->bbr_substate);
-			
 		fprintf(out, " i_cbw:%s (%lu)\n",
 			display_bw(i_cbw, 0), i_cbw);
 		print_out_space(out);
@@ -2389,7 +2388,7 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 		   (bbr->flex8 == HYBRID_LOG_CAP_CALC)) {
 		uint64_t rate_cap, lt_bw, now, deadline;
 		const char *res;
-		
+
 		deadline = bbr->cur_del_rate;
 		now = l->tlb_tv.tv_sec * 1000000;
 		now += l->tlb_tv.tv_usec;
@@ -2413,7 +2412,7 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 		}
 		fprintf(out, "Reason:%s ts:%u capped rate wanted:%s (%lu) from %s -- ",
 			hybrid_mode(bbr->flex8),
-			bbr->timeStamp, 
+			bbr->timeStamp,
 			display_bw(bbr->bw_inuse, 0), bbr->bw_inuse,
 			res);
 		fprintf(out, "gp_est:%s (%lu)\n",
@@ -2432,10 +2431,9 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 				deadline, now, del, bbr->pkts_out, bbr->flex6, l->tlb_snd_una,
 				(bbr->pkts_out - l->tlb_snd_una), bbr->bbr_substate);
 		}
-	
 	} else {
 		fprintf(out, "Don't know how to render %s [%d]\n",
-			hybrid_mode(bbr->flex8), bbr->flex8);	
+			hybrid_mode(bbr->flex8), bbr->flex8);
 	}
 }
 
@@ -2610,7 +2608,7 @@ show_hystart(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
 	 * 1 - rtt_thresh in flex1, checking to see if RTT is to great.
 	 * 2 - rtt is too great, rtt_thresh in flex1.
 	 * 3 - CSS is active incr in flex1
-	 * 4 - A new round is beginning flex1 is round count 
+	 * 4 - A new round is beginning flex1 is round count
 	 * 5 - A new RTT measurement flex1 is the new measurement.
 	 * 6 - We enter CA ssthresh is also in flex1.
 	 * 7 - Socket option to change hystart executed opt.val in flex1.
@@ -2656,7 +2654,7 @@ show_hystart(const struct tcp_log_buffer *l, const struct tcp_log_bbr *bbr)
 			l->tlb_iss);
 	} else if (bbr->flex8 == 21) {
 		double top, bot, per_oa, per_rnd, per_pd;
-		
+
 		top = bbr->delRate * 100.0;
 		bot = bbr->cur_del_rate * 1.0;
 		if (bot > 0.0) {
@@ -2990,7 +2988,7 @@ dump_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 			delivered_at_thresh = bbr->delivered;
 		}
 	}
-	
+
 	if (tlb_sn_set >  0) {
 		if ((tlb_sn+1) != l->tlb_sn) {
 			if (tlb_sn > l->tlb_sn) {
@@ -5190,7 +5188,7 @@ backward:
 			if (add_colon)
 				fprintf(out, "%u: %u rack [%u] %s ",
 					time_display, number_flow, timeoff, evt_name(id));
-			else 
+			else
 				fprintf(out, "%u %u rack [%u] %s ",
 					time_display, number_flow, timeoff, evt_name(id));
 
@@ -5255,7 +5253,7 @@ backward:
 			stored_gp <<= 32;
 			stored_gp |= bbr->pkts_out;
 			fprintf(out, "Clamps applied:%u Max:%u gp_bw:%s (%lu) min_to:%u\n",
-				bbr->delivered, bbr->applimited, 
+				bbr->delivered, bbr->applimited,
 				display_bw(stored_gp, 0), stored_gp, bbr->epoch);
 		} else if (bbr->flex8 == 6) {
 			uint64_t bw;
@@ -5357,7 +5355,7 @@ backward:
 			}
 		} else if (bbr->flex8 == 42) {
 			fprintf(out, "It Incremented Rnd:%u inc by:%u thresh:%u\n",
-				bbr->flex1, bbr->flex2, 
+				bbr->flex1, bbr->flex2,
 				bbr->flex3);
 
 		} else if (bbr->flex8 == 44) {
@@ -5373,7 +5371,6 @@ backward:
 				bbr->flex3, bbr->flex4,
 				bbr->cur_del_rate,
 				bbr->rttProp, bbr->delRate);
-				
 		} else {
 			fprintf(out, " Unknown Cwnd log flex8:%u\n", bbr->flex8);
 		}
@@ -5558,7 +5555,6 @@ backward:
 					delta_per = top / bot;
 					sprintf(dump_buf, "-%3.5f", delta_per);
 				}
-				
 			}
 			prev_gp_est = bbr->rttProp;
 			gbw = display_bw(bbr->rttProp, 1);
@@ -5780,7 +5776,6 @@ backward:
 			fprintf(out, "ALEAGMIR:0x%x delayed:%u early:%u\n",
 				bbr->use_lt_bw,
 				bbr->epoch, bbr->lt_epoch);
-				
 		} else if (bbr->flex8 == 27) {
 			fprintf(out, "Timer setup slot originally:%u we use %u ALEAGMIR:0x%x delayed:%u earlly:%u\n",
 				bbr->flex2, bbr->flex1,
@@ -5789,7 +5784,7 @@ backward:
 		} else if (bbr->flex8 == 30) {
 			const char *dgp_on, *less_agg, *fillcw, *dis;
 			int discount;
-			
+
 			if (bbr->bbr_state & 0x10) {
 				dgp_on = "DGP active";
 			} else {
@@ -5818,8 +5813,8 @@ backward:
 				dgp_on, fillcw, less_agg, dis, discount, bbr->flex2, l->tlb_snd_cwnd);
 		} else if (bbr->flex8 == 69) {
 			const char *strnm;
-			
-			if (bbr->flex7 == 1) 
+
+			if (bbr->flex7 == 1)
 				strnm = "Setup";
 			else if (bbr->flex7 == 2)
 				strnm = "Change";
@@ -5874,7 +5869,7 @@ backward:
 					bbr->rttProp);
 			} else {
 				uint32_t snd_max, snd_una, seq_start, seq_end;
-				
+
 				if (use_relative_seq) {
 					snd_max = l->tlb_snd_max - l->tlb_iss;
 					snd_una = l->tlb_snd_una - l->tlb_iss;
@@ -5896,7 +5891,7 @@ backward:
 			print_out_space(out);
 			fprintf(out, "                  ack_ts_start:%u ack_ts_end:%u aplnset:%u\n",
 				bbr->flex4, bbr->flex3, bbr->cwnd_gain);
-			print_out_space(out);			
+			print_out_space(out);
 			fprintf(out, "                  snd_ts_start:%u snd_ts_end:%u apl_cnt:%u seqs:%u seqe:%u flags:0x%x\n",
 				(uint32_t)bbr->delRate, (uint32_t)bbr->rttProp, bbr->pkt_epoch,
 				bbr->applimited, bbr->delivered, bbr->epoch);
@@ -5907,7 +5902,7 @@ backward:
 				bbr->bw_inuse, bbr->rttProp, bbr->bbr_substate);
 		} else if (bbr->flex8 == 89) {
 			uint32_t buck_max, cur_buck;
-			
+
 			buck_max = (bbr->delRate & 0x00000000ffffffff);
 			cur_buck = ((bbr->delRate >> 32) & 0x00000000ffffffff);
 			fprintf(out, "Policed pacing at bw:%s (%lu) bucket_max:%u current_bucket:%u len:%u delay:%u\n",
@@ -6690,7 +6685,7 @@ backward:
 			if (clear_to_print) {
 				if (prev_sent_time && prev_sent_bytes && (l->tlb_len > 0)) {
 					uint64_t bw, now, t, oh;
-					
+
 					now = tcp_tv_to_lusectick(&l->tlb_tv);
 					bw = prev_sent_bytes;
 					oh = bw / (uint64_t)bbr->flex2;
@@ -6719,7 +6714,7 @@ backward:
 					clear_to_print = 0;
 				} else {
 					print_out_space(out);
-					if (l->tlb_len > 0) 
+					if (l->tlb_len > 0)
 						fprintf(out, "Paced at -- No B/W (idle) yet sn:%u sending:%u\n", l->tlb_sn, l->tlb_len);
 					else
 						fprintf(out, "Paced at -- No B/W sending:%u bytes\n", l->tlb_len);
