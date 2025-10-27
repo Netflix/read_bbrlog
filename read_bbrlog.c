@@ -2144,9 +2144,6 @@ hybrid_flags(uint32_t flags)
 		strcat(buf, "|HINT_MSS");
 	}
 #ifdef NETFLIX_TCP_STACK
-	if (flags & TCP_HAS_PLAYOUT_MS) {
-		strcat(buf, "|PLAY_MS");
-	}
 	if (flags & TCP_HYBRID_PACING_SENDTIME) {
 		strcat(buf, "|USE_ST");
 	}
