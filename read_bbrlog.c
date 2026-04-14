@@ -19,15 +19,17 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
-#define	_WANT_INPCB
 #include <netinet/in_pcb.h>
 #include <netinet/tcp_hpts.h>
 #include <dev/tcp_log/tcp_log_dev.h>
 #include <netinet/tcp_log_buf.h>
 #include <netinet/tcp_seq.h>
-#define	_WANT_TCPCB
 #include <netinet/tcp_var.h>
 #include <netinet/tcp_hpts.h>
+struct sackblk {
+	tcp_seq start;
+	tcp_seq end;
+};
 #include <netinet/tcp_stacks/sack_filter.h>
 #include <netinet/tcp_stacks/tcp_bbr.h>
 #include <netinet/tcp_stacks/tcp_rack.h>
@@ -275,9 +277,9 @@ static const char *log_names[MAX_TYPES] = {
 	"TCP_LOG_CONNEND", 	/* 54 */
 	"TCP_LRO_LOG",		/* 55 */
 	"SACK_FILTER_RESULT",	/* 56 */
-	"TCP_UNUSED_57",	/* 57 */
+	"TCP_SAD_DETECTION",	/* 57 */
 	"TCP_TIMELY_WORK",	/* 58 */
-	"TCP_UNUSED_59",	/* 59 */
+	"USER_LOG  ",		/* 59 */
 	"SENDFILE  ",		/* 60 */
 	"TCP_LOG_REQ_T",	/* 61 */
 	"TCP_ACCOUNTING",	/* 62 */
@@ -1430,6 +1432,12 @@ translate_tcp_sock_option(uint32_t opt)
 	} else if (opt == TCP_FILLCW_RATE_CAP) {
 		return ("TCP_FILLCW_RATE_CAP");
 #endif
+	} else if (opt == TCP_STACK_SPEC_INFO) {
+		return ("TCP_STACK_SPEC_INFO");
+	} else if (opt == RACK_CSPR_IS_FCC) {
+		return ("RACK_CSPR_IS_FCC");
+	} else if (opt == TCP_GP_USE_LTBW) {
+		return ("TCP_GP_USE_LTBW");
 	} else {
 		static char buf[128];
 		sprintf(buf, "Unknown? %d ", opt);
@@ -1448,24 +1456,18 @@ display_pru(const struct tcp_log_buffer *l)
 static void
 display_tcp_option(const struct tcp_log_buffer *l)
 {
-	fprintf(out, "Option:%s(%u) Value:%u errno:%d fb:0%lx\n",
-		translate_tcp_sock_option(l->tlb_flex1),
-		l->tlb_flex1,
-		l->tlb_flex2,
-		l->tlb_errno,
-		l->tlb_stackinfo.u_bbr.delRate);
-}
-
-static void
-display_tp_trigger(const struct tcp_log_buffer *l)
-{
-	const struct tcp_log_bbr *bbr;
-
-	bbr = &l->tlb_stackinfo.u_bbr;
-	fprintf(out, " Line:%d TP Number:%u count left:%u\n",
-		bbr->flex1,
-		bbr->flex3,
-		bbr->flex2);
+	if (l->tlb_flex1 == 0) {
+		/* This is the special copy during cloning of a listener */
+		fprintf(out, "Copied out %u non-default options from listner err%d\n",
+			l->tlb_flex2, l->tlb_errno);
+	} else {
+		fprintf(out, "Option:%s(%u) Value:%u errno:%d fb:0%lx\n",
+			translate_tcp_sock_option(l->tlb_flex1),
+			l->tlb_flex1,
+			l->tlb_flex2,
+			l->tlb_errno,
+			l->tlb_stackinfo.u_bbr.delRate);
+	}
 }
 
 static void
@@ -2332,7 +2334,10 @@ display_hybrid_pacing(const struct tcp_log_buffer *l, const struct tcp_log_bbr *
 			chk_tim += (sendtime - localtime);
 		}
 		i_cbw = data * 1000000;
-		i_cbw /= chk_tim;
+		if (chk_tim > 0)
+			i_cbw /= chk_tim;
+		else
+			i_cbw = 0;
 		fprintf(out, "Reason:%s cbw:%s (%lu) data:%lu tim:%lu idx:%u",
 			hybrid_mode(bbr->flex8),
 			display_bw(bbr->bw_inuse, 0), bbr->bw_inuse,
@@ -2496,11 +2501,8 @@ static void
 show_pacer_diag(const struct tcp_log_bbr *bbr)
 {
 	const char  *state;
-	uint32_t p_lasttick, p_curtick;
 
 	if (bbr->use_lt_bw == 0) {
-		p_lasttick = (bbr->cur_del_rate & 0x00000000ffffffff);
-		p_curtick = ((bbr->cur_del_rate >> 32) & 0x00000000ffffffff);
 		if (bbr->flex7)
 			state = "active";
 		else
@@ -2514,7 +2516,7 @@ show_pacer_diag(const struct tcp_log_bbr *bbr)
 			bbr->inflight);
 		if (extra_print) {
 			print_out_space(out);
-			fprintf(out, "PACERDIAG slot_req:%u inp_hptsslot:%u slot_remaining:%u have_slept:%u\n",
+			fprintf(out, "PACERDIAG slot_req:%u inp_hptsslot:%u time_remaining:%u have_slept:%u\n",
 				bbr->flex3, bbr->flex4, bbr->flex5, bbr->epoch);
 			print_out_space(out);
 			fprintf(out, "PACERDIAG hptscpu:%u actcpu:%u inp_flowid:%u inp_flowtype:%u\n",
@@ -2524,10 +2526,8 @@ show_pacer_diag(const struct tcp_log_bbr *bbr)
 				bbr->applimited, bbr->lt_epoch, bbr->flex6,
 				bbr->bw_inuse, bbr->delRate);
 			print_out_space(out);
-			fprintf(out, "PACERDIAG wheel_cts:%lu co_ret:%u on_min_sleep:%d ctim:%u ptim:%u (ctim - ptim = %u) (wheel - p_curtick = %u) \n",
-				bbr->rttProp, bbr->pkts_out, bbr->flex8, p_curtick, p_lasttick,
-				(p_curtick - p_lasttick),
-				((uint32_t)bbr->rttProp - p_curtick)
+			fprintf(out, "PACERDIAG wheel_cts:%lu co_ret:%u on_min_sleep:%d \n",
+				bbr->rttProp, bbr->pkts_out, bbr->flex8
 				);
 
 		}
@@ -2537,13 +2537,11 @@ show_pacer_diag(const struct tcp_log_bbr *bbr)
 		 * flex2 - contains the current slot (translated time now to slot)
 		 * flex3 - contains the previous slot from the last run.
 		 * flex4 - contains the slot array index we are processing (i)
-		 * flex5 - contains the current tick i.e. the time we started mapped to the wheel.
 		 * flex6 - contains the number of inp's on the this wheel.
 		 * flex7 - contains the cpu we are running on.
 		 * flex8 - indicates if we are from the callout(1) or from a syscall/lro (0)
 		 * inflight - tells us how many ticks we are running in this pass
 		 * applimited - tells us the overriden_sleep value.
-		 * delivered  - tells the saved_curtick i.e the tick on entry at the beginning.
 		 * epoch - tells us the saved_curslot i.e. the curslot on entry
 		 * lt_epoch - tells us the saved prev slot i.e the prevslot on entry
 		 * pkts_out - tells us the calculated delayed by value
@@ -2552,20 +2550,19 @@ show_pacer_diag(const struct tcp_log_bbr *bbr)
 		 * pkt_epoch - Is the tick we are currently processing.
 		 * use_lt_bw - is set to 1 to indicate this type of diag log
 		 */
-		fprintf(out, "PACER(%s) nxt_slot:%u prev_slot:%u cur_slot:%u at:%u rt:%u onqueue:%u curtick:%u sleeptime:%u\n",
+		fprintf(out, "PACER(%s) nxt_slot:%u prev_slot:%u cur_slot:%u at:%u rt:%u onqueue:%u sleeptime:%u\n",
 			(bbr->flex8 ? "callout" : "syscall"),
 			bbr->flex1, bbr->flex3, bbr->flex2, bbr->flex4,
 			bbr->pkt_epoch,
-			bbr->flex6, bbr->flex5,
+			bbr->flex6,
 			bbr->lost
 			);
 		if (extra_print) {
 			print_out_space(out);
-			fprintf(out, "ticks_to_run:%u saved_prev_slot:%u saved_cur_slot:%u saved_curtick:%u delayed:%u\n",
+			fprintf(out, "ticks_to_run:%u saved_prev_slot:%u saved_cur_slot:%u delayed:%u\n",
 				bbr->inflight,
 				bbr->lt_epoch,
 				bbr->epoch,
-				bbr->delivered,
 				bbr->pkts_out);
 			print_out_space(out);
 			fprintf(out, " sleep_override:%u actcpu:%u hptscpu:%u\n",
@@ -3844,9 +3841,6 @@ backwards:
 	case TCP_CHG_QUERY:
 		display_change_query(l, bbr);
 		break;
-	case TCP_RACK_TP_TRIGGERED:
-		display_tp_trigger(l);
-		break;
 	case TCP_HYBRID_PACING_LOG:
 		display_hybrid_pacing(l, bbr);
 		break;
@@ -4966,8 +4960,10 @@ translate_quality_metric(uint8_t quality)
 		sprintf(buffer, "Low applimited");
 	} else if (quality == RACK_QUALITY_PERSIST) {
 		sprintf(buffer, "Low pesist");
+#ifdef NFLX_DGP
 	} else if (quality == RACK_QUALITY_PROBERTT) {
 		sprintf(buffer, "Low probertt");
+#endif
 	} else if (quality == RACK_QUALITY_ALLACKED) {
 		sprintf(buffer, "Low allacked");
 	} else {
@@ -5032,7 +5028,7 @@ dump_rack_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 	    (id == TCP_LOG_PRU) ||
 	    (id == TCP_LOG_SENDFILE) ||
 	    (id == TCP_LOG_SOCKET_OPT)){
-		l_timeStamp = (uint32_t) ((l->tlb_tv.tv_sec * HPTS_USEC_IN_SEC) + l->tlb_tv.tv_usec);
+		l_timeStamp = tcp_tv_to_lusec(&l->tlb_tv);
 	}
 	if (tlb_sn_set > 0) {
 		if ((tlb_sn+1) != l->tlb_sn) {
@@ -6604,9 +6600,6 @@ backward:
 			fprintf(out, "-- Unknown val in flex8 %d\n", bbr->flex8);
 		}
 		break;
-	case TCP_RACK_TP_TRIGGERED:
-		display_tp_trigger(l);
-		break;
 	case TCP_HYBRID_PACING_LOG:
 		display_hybrid_pacing(l, bbr);
 		break;
@@ -6615,6 +6608,11 @@ backward:
 		break;
 	case TCP_LOG_RTO:
 		display_tcp_rto(l);
+		break;
+	case BBR_LOG_THRESH_CALC:
+		fprintf(out, "Change GP Add:%u Sub:%u wma:%u srtt:%u line:%u meth:%u gp_bw:%lu meas_bw:%lu utim:%lu\n",
+			bbr->flex1, bbr->flex2, bbr->flex3, bbr->flex4, bbr->flex7, bbr->flex8,
+			bbr->delRate, bbr->cur_del_rate, bbr->rttProp);
 		break;
 	case TCP_LOG_OUT:
 	{
@@ -7408,9 +7406,6 @@ dump_default_log_entry(const struct tcp_log_buffer *l, const struct tcphdr *th)
 		break;
 	case TCP_CHG_QUERY:
 		display_change_query(l, bbr);
-		break;
-	case TCP_RACK_TP_TRIGGERED:
-		display_tp_trigger(l);
 		break;
 	case TCP_HYBRID_PACING_LOG:
 		display_hybrid_pacing(l, bbr);
